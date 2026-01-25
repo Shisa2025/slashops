@@ -57,8 +57,13 @@ export type FreightOutputs = {
   loadportDays: number;
   disportDays: number;
   totalDuration: number;
+  freightGross: number;
+  freightNet: number;
+  freightCommissions: number;
+  revenueNet: number;
   hireGross: number;
   hireNet: number;
+  hireCommissions: number;
   ifoAtSea: number;
   mdoAtSea: number;
   ifoInPort: number;
@@ -66,8 +71,11 @@ export type FreightOutputs = {
   totalIfo: number;
   totalMdo: number;
   bunkerExpense: number;
-  revenueNet: number;
+  portDisbursements: number;
+  operatingExpenses: number;
+  miscExpense: number;
   miscExpenseTotal: number;
+  totalExpenses: number;
   profit: number;
   tce: number;
 };
@@ -115,22 +123,21 @@ export const calculateFreight = (inputs: FreightInputs): FreightOutputs => {
   const bunkerExpense = totalIfo * costs.ifoPrice + totalMdo * costs.mdoPrice;
 
   const hireGross = vessel.dailyHire * totalDuration;
-  const hireNet = hireGross * (1 - vessel.adComsPct);
+  const hireCommissions = hireGross * vessel.adComsPct;
+  const hireNet = hireGross - hireCommissions;
 
   const freightGross = loadedQty * cargo.freightRate;
-  const freightNet =
-    freightGross * (1 - cargo.addressComsPct - cargo.brokerComsPct);
+  const freightCommissions = freightGross * (cargo.addressComsPct + cargo.brokerComsPct);
+  const freightNet = freightGross - freightCommissions;
   const revenueNet = freightNet + cargo.ballastBonus;
 
-  const miscExpenseTotal =
-    costs.cev +
-    costs.ilhoc +
-    costs.bunkerDa +
-    costs.portDisbLoad +
-    costs.portDisbDis +
-    costs.miscExpense;
+  const portDisbursements = costs.portDisbLoad + costs.portDisbDis;
+  const operatingExpenses = costs.cev + costs.ilhoc + costs.bunkerDa;
+  const miscExpense = costs.miscExpense;
+  const miscExpenseTotal = operatingExpenses + portDisbursements + miscExpense;
+  const totalExpenses = hireNet + bunkerExpense + miscExpenseTotal;
 
-  const profit = revenueNet - hireNet - bunkerExpense - miscExpenseTotal;
+  const profit = revenueNet - totalExpenses;
   const tce = totalDuration > 0 ? profit / totalDuration : 0;
 
   return {
@@ -141,8 +148,13 @@ export const calculateFreight = (inputs: FreightInputs): FreightOutputs => {
     loadportDays,
     disportDays,
     totalDuration,
+    freightGross,
+    freightNet,
+    freightCommissions,
+    revenueNet,
     hireGross,
     hireNet,
+    hireCommissions,
     ifoAtSea,
     mdoAtSea,
     ifoInPort,
@@ -150,8 +162,11 @@ export const calculateFreight = (inputs: FreightInputs): FreightOutputs => {
     totalIfo,
     totalMdo,
     bunkerExpense,
-    revenueNet,
+    portDisbursements,
+    operatingExpenses,
+    miscExpense,
     miscExpenseTotal,
+    totalExpenses,
     profit,
     tce,
   };
