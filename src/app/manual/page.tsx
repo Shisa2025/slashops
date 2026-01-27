@@ -176,12 +176,34 @@ const normalizePortKey = (value: string) =>
     .replace(/[^A-Z0-9]/g, "")
     .trim();
 
+const simplifyPortLabel = (value: string) => {
+  const noParens = value.replace(/\([^)]*\)/g, "");
+  const splitDash = noParens.split(/-|–|—/)[0] ?? noParens;
+  const splitComma = splitDash.split(",")[0] ?? splitDash;
+  return splitComma.trim();
+};
+
 const resolvePortName = (value: string, ports: string[]) => {
   if (!value) return "";
   const target = normalizePortKey(value);
   if (!target) return "";
   const byNormalized = new Map(ports.map((port) => [normalizePortKey(port), port]));
-  return byNormalized.get(target) ?? value;
+  if (byNormalized.has(target)) return byNormalized.get(target) ?? value;
+
+  const simplified = simplifyPortLabel(value);
+  const simplifiedKey = normalizePortKey(simplified);
+  if (simplifiedKey && byNormalized.has(simplifiedKey)) {
+    return byNormalized.get(simplifiedKey) ?? simplified;
+  }
+
+  for (const port of ports) {
+    const portKey = normalizePortKey(port);
+    if (target.includes(portKey) || portKey.includes(target)) {
+      return port;
+    }
+  }
+
+  return value;
 };
 
 const extractPortFromStatus = (value: string) => {
