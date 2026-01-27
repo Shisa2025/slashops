@@ -237,17 +237,20 @@ export default function ManualCalculationPage() {
   const [cargos, setCargos] = useState<CargoOption[]>([]);
   const [ports, setPorts] = useState<string[]>([]);
   const [distanceMap, setDistanceMap] = useState<Record<string, Record<string, number>>>({});
-  const [selectedVesselId, setSelectedVesselId] = useState<string>("");
-  const [selectedCargoId, setSelectedCargoId] = useState<string>("");
   const [bunkerPrices, setBunkerPrices] = useState({
     ifo: exampleInputs.costs.ifoPrice,
     mdo: exampleInputs.costs.mdoPrice,
   });
   const [portDelayDays, setPortDelayDays] = useState<number>(0);
-  const [dailyHireOverride, setDailyHireOverride] = useState<number | null>(null);
-  const [adComsOverride, setAdComsOverride] = useState<number | null>(null);
-  const [freightOverride, setFreightOverride] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string>("");
+  const [voyages, setVoyages] = useState<
+    Array<{
+      id: string;
+      vesselId: string;
+      cargoId: string;
+      result?: ReturnType<typeof calculateFreight>;
+    }>
+  >([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -332,7 +335,6 @@ export default function ManualCalculationPage() {
           } satisfies VesselOption;
         });
         setVessels(vesselsParsed);
-        setSelectedVesselId((prev) => prev || vesselsParsed[0]?.id || "");
 
         const committedRows = parseCsv(committedText);
         const marketCargoRows = parseCsv(marketCargosText);
@@ -377,7 +379,17 @@ export default function ManualCalculationPage() {
           } satisfies CargoOption;
         });
         setCargos(cargosParsed);
-        setSelectedCargoId((prev) => prev || cargosParsed[0]?.id || "");
+        setVoyages((prev) => {
+          if (prev.length > 0) return prev;
+          if (!vesselsParsed[0] || !cargosParsed[0]) return prev;
+          return [
+            {
+              id: `voyage-1`,
+              vesselId: vesselsParsed[0].id,
+              cargoId: cargosParsed[0].id,
+            },
+          ];
+        });
       })
       .catch((error) => {
         if (!isMounted) return;
@@ -397,111 +409,150 @@ export default function ManualCalculationPage() {
     };
   }, []);
 
-  const selectedVessel = vessels.find((vessel) => vessel.id === selectedVesselId) ?? vessels[0];
-  const selectedCargo = cargos.find((cargo) => cargo.id === selectedCargoId) ?? cargos[0];
-
-  const effectiveVessel = useMemo(() => {
-    if (!selectedVessel) return undefined;
-    return {
-      ...selectedVessel.data,
-      dailyHire: dailyHireOverride ?? selectedVessel.data.dailyHire,
-      adComsPct: adComsOverride ?? selectedVessel.data.adComsPct,
+  const getVoyageInputs = (voyage: { vesselId: string; cargoId: string }) => {
+    const vessel = vessels.find((item) => item.id === voyage.vesselId);
+    const cargo = cargos.find((item) => item.id === voyage.cargoId);
+    if (!vessel || !cargo) return undefined;
+    const ballastNm = getDistance(distanceMap, vessel.currentPort, cargo.loadPort);
+    const ladenNm = getDistance(distanceMap, cargo.loadPort, cargo.dischargePort);
+    const cargoData: FreightInputs["cargo"] = {
+      ...cargo.data,
+      portIdleDays: cargo.data.portIdleDays + portDelayDays,
     };
-  }, [selectedVessel, dailyHireOverride, adComsOverride]);
-
-  const effectiveCargo = useMemo(() => {
-    if (!selectedCargo) return undefined;
     return {
-      ...selectedCargo.data,
-      freightRate: freightOverride ?? selectedCargo.data.freightRate,
-      portIdleDays: selectedCargo.data.portIdleDays + portDelayDays,
-    };
-  }, [selectedCargo, freightOverride, portDelayDays]);
+      vessel: vessel.data,
+      cargo: cargoData,
+      distances: { ballastNm, ladenNm },
+      costs: {
+        ...exampleInputs.costs,
+        ifoPrice: bunkerPrices.ifo,
+        mdoPrice: bunkerPrices.mdo,
+        portDisbLoad: cargo.portCosts.load,
+        portDisbDis: cargo.portCosts.discharge,
+      },
+      options: { bunkerDays: exampleInputs.options.bunkerDays },
+    } satisfies FreightInputs;
+  };
 
-  const ballastNm =
-    selectedVessel && selectedCargo
-      ? getDistance(distanceMap, selectedVessel.currentPort, selectedCargo.loadPort)
-      : defaultDistanceNm;
-  const ladenNm =
-    selectedCargo && selectedCargo.loadPort && selectedCargo.dischargePort
-      ? getDistance(distanceMap, selectedCargo.loadPort, selectedCargo.dischargePort)
-      : defaultDistanceNm;
+  const calculateVoyage = (voyageId: string) => {
+    setVoyages((prev) =>
+      prev.map((voyage) => {
+        if (voyage.id !== voyageId) return voyage;
+        const inputs = getVoyageInputs(voyage);
+        if (!inputs) return voyage;
+        const result = calculateFreight(inputs);
+        return { ...voyage, result };
+      }),
+    );
+  };
 
-  const inputs: FreightInputs | undefined =
-    effectiveVessel && effectiveCargo
-      ? {
-          vessel: effectiveVessel,
-          cargo: effectiveCargo,
-          distances: { ballastNm, ladenNm },
-          costs: {
-            ...exampleInputs.costs,
-            ifoPrice: bunkerPrices.ifo,
-            mdoPrice: bunkerPrices.mdo,
-            portDisbLoad: selectedCargo?.portCosts.load ?? exampleInputs.costs.portDisbLoad,
-            portDisbDis: selectedCargo?.portCosts.discharge ?? exampleInputs.costs.portDisbDis,
-          },
-          options: { bunkerDays: exampleInputs.options.bunkerDays },
-        }
-      : undefined;
+  const totalProfit = useMemo(
+    () => voyages.reduce((sum, voyage) => sum + (voyage.result?.profit ?? 0), 0),
+    [voyages],
+  );
 
-  const result = inputs ? calculateFreight(inputs) : undefined;
+  const addVoyage = () => {
+    if (!vessels[0] || !cargos[0]) return;
+    setVoyages((prev) => [
+      ...prev,
+      {
+        id: `voyage-${prev.length + 1}`,
+        vesselId: vessels[0].id,
+        cargoId: cargos[0].id,
+      },
+    ]);
+  };
+
+  const updateVoyage = (voyageId: string, updates: Partial<{ vesselId: string; cargoId: string }>) => {
+    setVoyages((prev) =>
+      prev.map((voyage) =>
+        voyage.id === voyageId ? { ...voyage, ...updates, result: undefined } : voyage,
+      ),
+    );
+  };
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-10">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold">Manual Calculation</h1>
         <p className="text-sm text-neutral-600">
-          Select a vessel and cargo from CSV, then review the result as a structured breakdown.
+          Build voyages from CSV, then calculate each leg and total portfolio P&L.
         </p>
       </header>
 
-      <section className="grid gap-6 rounded-lg border border-neutral-200 p-4 md:grid-cols-[320px_1fr]">
+      <section className="grid gap-6 rounded-lg border border-neutral-200 p-4 md:grid-cols-[360px_1fr]">
         <div className="space-y-4">
           <div className="space-y-2">
-            <h2 className="text-base font-semibold">Inputs (CSV)</h2>
+            <h2 className="text-base font-semibold">Voyage List</h2>
             {loadError ? (
               <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                 {loadError}
               </div>
             ) : null}
-            <label className="text-sm">
-              <span className="text-neutral-500">Vessel</span>
-              <select
-                className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-                value={selectedVesselId}
-                onChange={(event) => setSelectedVesselId(event.target.value)}
-              >
-                {vessels.map((vessel) => (
-                  <option key={vessel.id} value={vessel.id}>
-                    {vessel.name} ({vessel.source})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm">
-              <span className="text-neutral-500">Cargo</span>
-              <select
-                className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-                value={selectedCargoId}
-                onChange={(event) => setSelectedCargoId(event.target.value)}
-              >
-                {cargos.map((cargo) => (
-                  <option key={cargo.id} value={cargo.id}>
-                    {cargo.name} ({cargo.source})
-                  </option>
-                ))}
-              </select>
-            </label>
+            <button
+              type="button"
+              className="w-full rounded border border-neutral-300 px-3 py-2 text-sm font-semibold hover:border-neutral-400"
+              onClick={addVoyage}
+            >
+              + Add Voyage
+            </button>
           </div>
 
-          <div className="space-y-2 text-xs text-neutral-600">
-            <div>
-              Route ports: {selectedCargo?.loadPort ?? "--"} {"->"}{" "}
-              {selectedCargo?.dischargePort ?? "--"}
-            </div>
-            <div>
-              Ballast start: {selectedVessel?.currentPort ?? "--"}
-            </div>
+          <div className="space-y-4">
+            {voyages.map((voyage, index) => {
+              const vessel = vessels.find((item) => item.id === voyage.vesselId);
+              const cargo = cargos.find((item) => item.id === voyage.cargoId);
+              const routeLabel = cargo ? `${cargo.loadPort} -> ${cargo.dischargePort}` : "--";
+              return (
+                <div key={voyage.id} className="rounded border border-neutral-200 p-3 text-sm">
+                  <div className="text-xs font-semibold text-neutral-500">
+                    Voyage {index + 1}
+                  </div>
+                  <label className="mt-2 block text-sm">
+                    <span className="text-neutral-500">Vessel</span>
+                    <select
+                      className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+                      value={voyage.vesselId}
+                      onChange={(event) => updateVoyage(voyage.id, { vesselId: event.target.value })}
+                    >
+                      {vessels.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name} ({option.source})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="mt-2 block text-sm">
+                    <span className="text-neutral-500">Cargo</span>
+                    <select
+                      className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+                      value={voyage.cargoId}
+                      onChange={(event) => updateVoyage(voyage.id, { cargoId: event.target.value })}
+                    >
+                      {cargos.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name} ({option.source})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="mt-2 text-xs text-neutral-600">
+                    Route: {routeLabel}
+                  </div>
+                  <div className="mt-2 text-xs text-neutral-600">
+                    Ballast start: {vessel?.currentPort ?? "--"}
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-3 w-full rounded border border-neutral-300 px-3 py-2 text-xs font-semibold hover:border-neutral-400"
+                    onClick={() => calculateVoyage(voyage.id)}
+                    disabled={!vessel || !cargo}
+                  >
+                    Calculate
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           <div className="space-y-3">
@@ -549,178 +600,91 @@ export default function ManualCalculationPage() {
               </select>
             </label>
           </div>
-
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-neutral-700">Overrides</h3>
-            <label className="text-sm">
-              <span className="text-neutral-500">Daily Hire ($/day)</span>
-              <input
-                className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-                type="number"
-                value={dailyHireOverride ?? selectedVessel?.data.dailyHire ?? ""}
-                onChange={(event) =>
-                  setDailyHireOverride(
-                    event.target.value ? Number(event.target.value) : null,
-                  )
-                }
-              />
-            </label>
-            <label className="text-sm">
-              <span className="text-neutral-500">Adcoms (%)</span>
-              <input
-                className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-                type="number"
-                value={
-                  adComsOverride !== null
-                    ? adComsOverride * 100
-                    : (selectedVessel?.data.adComsPct ?? 0) * 100
-                }
-                onChange={(event) =>
-                  setAdComsOverride(
-                    event.target.value ? Number(event.target.value) / 100 : null,
-                  )
-                }
-              />
-            </label>
-            <label className="text-sm">
-              <span className="text-neutral-500">Freight Rate ($/MT)</span>
-              <input
-                className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
-                type="number"
-                value={freightOverride ?? selectedCargo?.data.freightRate ?? ""}
-                onChange={(event) =>
-                  setFreightOverride(
-                    event.target.value ? Number(event.target.value) : null,
-                  )
-                }
-              />
-            </label>
-          </div>
         </div>
 
         <div className="space-y-6">
           <section className="rounded-lg border border-neutral-200 p-4 text-sm">
-            <h2 className="text-lg font-semibold">Vessel Details</h2>
+            <h2 className="text-lg font-semibold">Portfolio Summary</h2>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="text-neutral-500">Ship Name</div>
-              <div>{selectedVessel?.name ?? "--"}</div>
-              <div className="text-neutral-500">DWT</div>
-              <div>{formatNumber(selectedVessel?.data.dwt ?? 0)}</div>
-              <div className="text-neutral-500">Speed (Ballast/Laden)</div>
-              <div>
-                {formatNumber(selectedVessel?.data.speed.ballast ?? 0)} /{" "}
-                {formatNumber(selectedVessel?.data.speed.laden ?? 0)} kn
-              </div>
-              <div className="text-neutral-500">Fuel (Ballast IFO/MDO)</div>
-              <div>
-                {formatNumber(selectedVessel?.data.consumption.ballast.ifo ?? 0)} /{" "}
-                {formatNumber(selectedVessel?.data.consumption.ballast.mdo ?? 0)}
-              </div>
-              <div className="text-neutral-500">Fuel (Laden IFO/MDO)</div>
-              <div>
-                {formatNumber(selectedVessel?.data.consumption.laden.ifo ?? 0)} /{" "}
-                {formatNumber(selectedVessel?.data.consumption.laden.mdo ?? 0)}
-              </div>
-              <div className="text-neutral-500">Port (Working IFO/MDO)</div>
-              <div>
-                {formatNumber(selectedVessel?.data.portConsumption.working.ifo ?? 0)} /{" "}
-                {formatNumber(selectedVessel?.data.portConsumption.working.mdo ?? 0)}
-              </div>
-              <div className="text-neutral-500">Port (Idle IFO/MDO)</div>
-              <div>
-                {formatNumber(selectedVessel?.data.portConsumption.idle.ifo ?? 0)} /{" "}
-                {formatNumber(selectedVessel?.data.portConsumption.idle.mdo ?? 0)}
-              </div>
-              <div className="text-neutral-500">Daily Hire</div>
-              <div>{formatMoney(effectiveVessel?.dailyHire ?? 0)}</div>
-              <div className="text-neutral-500">Adcoms</div>
-              <div>{formatNumber((effectiveVessel?.adComsPct ?? 0) * 100)}%</div>
+              <div className="text-neutral-500">Total Voyages</div>
+              <div>{voyages.length}</div>
+              <div className="text-neutral-500">Total Profit</div>
+              <div>{formatMoney(totalProfit)}</div>
             </div>
           </section>
 
-          <section className="rounded-lg border border-neutral-200 p-4 text-sm">
-            <h2 className="text-lg font-semibold">Distances</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="text-neutral-500">Ballast (NM)</div>
-              <div>{formatNumber(ballastNm)}</div>
-              <div className="text-neutral-500">Ballast Duration</div>
-              <div>{formatNumber(result?.ballastDays ?? 0)} days</div>
-              <div className="text-neutral-500">Laden (NM)</div>
-              <div>{formatNumber(ladenNm)}</div>
-              <div className="text-neutral-500">Laden Duration</div>
-              <div>{formatNumber(result?.ladenDays ?? 0)} days</div>
-            </div>
-          </section>
+          {voyages.map((voyage, index) => {
+            const vessel = vessels.find((item) => item.id === voyage.vesselId);
+            const cargo = cargos.find((item) => item.id === voyage.cargoId);
+            const inputs = voyage.result ? getVoyageInputs(voyage) : undefined;
+            const result = voyage.result;
+            const ballastNm =
+              vessel && cargo
+                ? getDistance(distanceMap, vessel.currentPort, cargo.loadPort)
+                : defaultDistanceNm;
+            const ladenNm =
+              cargo ? getDistance(distanceMap, cargo.loadPort, cargo.dischargePort) : defaultDistanceNm;
+            return (
+              <section key={voyage.id} className="rounded-lg border border-neutral-200 p-4 text-sm">
+                <h2 className="text-lg font-semibold">
+                  Voyage {index + 1}: {vessel?.name ?? "--"} → {cargo?.name ?? "--"}
+                </h2>
+                {!result ? (
+                  <div className="mt-3 text-xs text-neutral-500">
+                    Click Calculate to generate results.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">Route</div>
+                      <div>
+                        {cargo?.loadPort ?? "--"} → {cargo?.dischargePort ?? "--"}
+                      </div>
+                      <div className="text-neutral-500">Ballast Start</div>
+                      <div>{vessel?.currentPort ?? "--"}</div>
+                      <div className="text-neutral-500">Ballast NM</div>
+                      <div>{formatNumber(ballastNm)}</div>
+                      <div className="text-neutral-500">Laden NM</div>
+                      <div>{formatNumber(ladenNm)}</div>
+                    </div>
 
-          <section className="rounded-lg border border-neutral-200 p-4 text-sm">
-            <h2 className="text-lg font-semibold">Cargo Details</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="text-neutral-500">Cargo Qty</div>
-              <div>{formatNumber(effectiveCargo?.cargoQty ?? 0)} MT</div>
-              <div className="text-neutral-500">Stow Factor</div>
-              <div>{formatNumber(effectiveCargo?.stowFactor ?? 0)}</div>
-              <div className="text-neutral-500">Loaded Qty</div>
-              <div>{formatNumber(result?.loadedQty ?? 0)} MT</div>
-              <div className="text-neutral-500">Freight Rate</div>
-              <div>{formatMoney(effectiveCargo?.freightRate ?? 0)} / MT</div>
-              <div className="text-neutral-500">Address Coms</div>
-              <div>{formatNumber((effectiveCargo?.addressComsPct ?? 0) * 100)}%</div>
-              <div className="text-neutral-500">Broker Coms</div>
-              <div>{formatNumber((effectiveCargo?.brokerComsPct ?? 0) * 100)}%</div>
-              <div className="text-neutral-500">Load Rate</div>
-              <div>{formatNumber(effectiveCargo?.loadRate ?? 0)} MT/day</div>
-              <div className="text-neutral-500">Discharge Rate</div>
-              <div>{formatNumber(effectiveCargo?.dischargeRate ?? 0)} MT/day</div>
-              <div className="text-neutral-500">Loadport TT</div>
-              <div>{formatNumber(effectiveCargo?.loadportTT ?? 0)} days</div>
-              <div className="text-neutral-500">Disport TT</div>
-              <div>{formatNumber(effectiveCargo?.disportTT ?? 0)} days</div>
-              <div className="text-neutral-500">Port Idle</div>
-              <div>{formatNumber(effectiveCargo?.portIdleDays ?? 0)} days</div>
-            </div>
-          </section>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">Total Duration</div>
+                      <div>{formatNumber(result.totalDuration)} days</div>
+                      <div className="text-neutral-500">Freight Net</div>
+                      <div>{formatMoney(result.freightNet)}</div>
+                      <div className="text-neutral-500">Total Expenses</div>
+                      <div>{formatMoney(result.totalExpenses)}</div>
+                      <div className="text-neutral-500">Profit</div>
+                      <div>{formatMoney(result.profit)}</div>
+                      <div className="text-neutral-500">TCE</div>
+                      <div>{formatMoney(result.tce)}</div>
+                    </div>
 
-          <section className="rounded-lg border border-neutral-200 p-4 text-sm">
-            <h2 className="text-lg font-semibold">Expenses</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="text-neutral-500">Hire (Gross)</div>
-              <div>{formatMoney(result?.hireGross ?? 0)}</div>
-              <div className="text-neutral-500">Hire (Net)</div>
-              <div>{formatMoney(result?.hireNet ?? 0)}</div>
-              <div className="text-neutral-500">IFO (Total)</div>
-              <div>{formatNumber(result?.totalIfo ?? 0)} MT</div>
-              <div className="text-neutral-500">MDO (Total)</div>
-              <div>{formatNumber(result?.totalMdo ?? 0)} MT</div>
-              <div className="text-neutral-500">Bunker Expense</div>
-              <div>{formatMoney(result?.bunkerExpense ?? 0)}</div>
-              <div className="text-neutral-500">Port Disbursements</div>
-              <div>{formatMoney(result?.portDisbursements ?? 0)}</div>
-              <div className="text-neutral-500">Operating Expenses</div>
-              <div>{formatMoney(result?.operatingExpenses ?? 0)}</div>
-              <div className="text-neutral-500">Misc Expense</div>
-              <div>{formatMoney(result?.miscExpense ?? 0)}</div>
-              <div className="text-neutral-500">Total Expenses</div>
-              <div>{formatMoney(result?.totalExpenses ?? 0)}</div>
-            </div>
-          </section>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">Hire (Net)</div>
+                      <div>{formatMoney(result.hireNet)}</div>
+                      <div className="text-neutral-500">Bunker Expense</div>
+                      <div>{formatMoney(result.bunkerExpense)}</div>
+                      <div className="text-neutral-500">Port Disbursements</div>
+                      <div>{formatMoney(result.portDisbursements)}</div>
+                      <div className="text-neutral-500">Operating Expenses</div>
+                      <div>{formatMoney(result.operatingExpenses)}</div>
+                    </div>
 
-          <section className="rounded-lg border border-neutral-200 p-4 text-sm">
-            <h2 className="text-lg font-semibold">Revenue / Profit / TCE</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="text-neutral-500">Freight Gross</div>
-              <div>{formatMoney(result?.freightGross ?? 0)}</div>
-              <div className="text-neutral-500">Freight Net</div>
-              <div>{formatMoney(result?.freightNet ?? 0)}</div>
-              <div className="text-neutral-500">Revenue Net</div>
-              <div>{formatMoney(result?.revenueNet ?? 0)}</div>
-              <div className="text-neutral-500">Profit</div>
-              <div>{formatMoney(result?.profit ?? 0)}</div>
-              <div className="text-neutral-500">TCE</div>
-              <div>{formatMoney(result?.tce ?? 0)}</div>
-              <div className="text-neutral-500">Total Duration</div>
-              <div>{formatNumber(result?.totalDuration ?? 0)} days</div>
-            </div>
-          </section>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">Loaded Qty</div>
+                      <div>{formatNumber(result.loadedQty)} MT</div>
+                      <div className="text-neutral-500">Load Rate</div>
+                      <div>{formatNumber(inputs?.cargo.loadRate ?? 0)} MT/day</div>
+                      <div className="text-neutral-500">Discharge Rate</div>
+                      <div>{formatNumber(inputs?.cargo.dischargeRate ?? 0)} MT/day</div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       </section>
     </main>
