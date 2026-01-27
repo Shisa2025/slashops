@@ -4,24 +4,25 @@ import Link from "next/link";
 
 const cards = [
   {
+    title: "AI Chatbot",
+    description: "Ask operational questions and get instant assistance.",
+    href: "/chat",
+  },
+  {
     title: "Manual Calculation",
     description: "Select vessels and cargos from CSV with detailed breakdowns.",
     href: "/manual",
-  },
-  {
-    title: "Demo Calculation",
-    description: "Preset vessel/cargo demo with recommendations and summary.",
-    href: "/democalculation1",
   },
 ];
 
 export default function Home() {
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-12">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold">Calculations</h1>
+    <main className="mx-auto flex max-w-4xl flex-col gap-8 px-6 py-12">
+      <header className="space-y-3">
+        <p className="text-xs uppercase tracking-wide text-neutral-500">SlashOps</p>
+        <h1 className="text-3xl font-semibold">Operations Toolkit</h1>
         <p className="text-sm text-neutral-600">
-          Choose a mode to start your freight and voyage calculations.
+          Start a calculation or open the assistant to support your daily workflow.
         </p>
       </header>
 
@@ -30,12 +31,18 @@ export default function Home() {
           <Link
             key={card.href}
             href={card.href}
-            className="rounded-lg border border-neutral-200 p-4 transition hover:border-neutral-400"
+            className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm transition hover:border-neutral-400 hover:shadow-md"
           >
             <div className="text-base font-semibold">{card.title}</div>
             <div className="mt-2 text-sm text-neutral-600">{card.description}</div>
+            <div className="mt-4 text-xs font-semibold text-neutral-500">Open</div>
           </Link>
         ))}
+      </section>
+
+      <section className="rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+        Tip: Keep API keys in <code className="rounded bg-white px-1 py-0.5">.env.local</code> and
+        avoid sharing them in chat or email.
       </section>
     </main>
   );

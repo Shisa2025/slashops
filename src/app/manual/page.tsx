@@ -664,10 +664,12 @@ export default function ManualCalculationPage() {
                       </div>
                       <div className="text-neutral-500">Ballast Start</div>
                       <div>{vessel?.currentPort ?? "--"}</div>
-                      <div className="text-neutral-500">Ballast NM</div>
+                      <div className="text-neutral-500">Ballast (Start â†’ Load) NM</div>
                       <div>{formatNumber(ballastNm)}</div>
-                      <div className="text-neutral-500">Laden NM</div>
+                      <div className="text-neutral-500">Laden (Load â†’ Discharge) NM</div>
                       <div>{formatNumber(ladenNm)}</div>
+                      <div className="text-neutral-500">Total NM</div>
+                      <div>{formatNumber(ballastNm + ladenNm)}</div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
