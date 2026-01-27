@@ -1,0 +1,5 @@
+vessel_name,dwt_mt,hire_rate_usd_day,warranted_speed_laden_kn,warranted_speed_laden_vlsf_mt,warranted_speed_laden_mgo_mt,warranted_speed_ballast_kn,warranted_speed_ballast_vlsf_mt,warranted_speed_ballast_mgo_mt,economical_speed_laden_kn,economical_speed_laden_vlsf_mt,economical_speed_laden_mgo_mt,economical_speed_ballast_kn,economical_speed_ballast_vlsf_mt,economical_speed_ballast_mgo_mt,port_consumption_idle_vlsf_mt_day,port_consumption_working_vlsf_mt_day,position_status,etd_date,bunker_remaining_vlsf_mt,bunker_remaining_mgo_mt
+ANN BELL,180803,11750,13.5,60.0,2.0,14.5,55.0,2.0,12.0,42.0,2.0,12.5,38.0,2.0,2.0,3.0,"Discharging Qingdao, China",2026-02-25,401.3,45.1
+OCEAN HORIZON,181550,15750,13.8,61.0,1.8,14.8,56.5,1.8,12.3,43.0,1.8,12.8,39.5,1.8,1.8,3.2,"Discharging Map Ta Phut, Thailand",2026-03-01,265.8,64.3
+PACIFIC GLORY,182320,14800,13.5,59.0,1.9,14.2,54.0,1.9,12.2,44.0,1.9,12.7,40.0,1.9,2.0,3.0,"Discharging Gwangyang, S. Korea",2026-03-10,601.9,98.1
+GOLDEN ASCENT,179965,13950,13.0,58.0,2.0,14.0,53.0,2.0,11.8,41.0,2.0,12.3,37.0,2.0,1.9,3.1,"Discharging Fangcheng, China",2026-03-08,793.3,17.1
