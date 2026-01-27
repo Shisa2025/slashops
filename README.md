@@ -42,3 +42,5 @@ npm start
 ---
 
 **Written by Shisa**
+
+ 我jiashen是大傻逼
