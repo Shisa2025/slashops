@@ -20,8 +20,7 @@ export default function ChatPage() {
     if (!content || loading) return;
     setError("");
     setInput("");
-    const nextMessages = [...messages, { role: "user", content }];
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, { role: "user", content }]);
     setLoading(true);
 
     try {
