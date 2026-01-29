@@ -9,6 +9,13 @@ import {
   type LaycanEvaluation,
   type LaycanWindow,
 } from "../../calculator/laycan";
+import {
+  defaultDistanceNm,
+  extractPortFromStatus,
+  getDistance,
+  parseDistanceCsv,
+  resolvePortName,
+} from "../../calculator/portDistances";
 
 type CsvRow = Record<string, string>;
 
@@ -17,6 +24,7 @@ type VesselOption = {
   name: string;
   source: "capesize" | "market";
   currentPort: string;
+  etdDate: string;
   raw: CsvRow;
   data: FreightInputs["vessel"];
 };
@@ -43,6 +51,17 @@ const formatMoney = (value: number) =>
 
 const formatNumber = (value: number) =>
   value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+const formatDateLabel = (value?: string) => {
+  const parsed = parseDateInput(value ?? "");
+  if (!parsed) return "--";
+  return parsed.toLocaleDateString("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
 
 const parseCsv = (text: string): CsvRow[] => {
   const rows: string[][] = [];
@@ -179,90 +198,6 @@ const parsePortCosts = (
   return { load: amounts[0], discharge: amounts[1] ?? fallbackDischarge };
 };
 
-const normalizePortKey = (value: string) =>
-  value
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .trim();
-
-const simplifyPortLabel = (value: string) => {
-  const noParens = value.replace(/\([^)]*\)/g, "");
-  const splitDash = noParens.split(/-|–|—/)[0] ?? noParens;
-  const splitComma = splitDash.split(",")[0] ?? splitDash;
-  return splitComma.trim();
-};
-
-const resolvePortName = (value: string, ports: string[]) => {
-  if (!value) return "";
-  const target = normalizePortKey(value);
-  if (!target) return "";
-  const byNormalized = new Map(ports.map((port) => [normalizePortKey(port), port]));
-  if (byNormalized.has(target)) return byNormalized.get(target) ?? value;
-
-  const simplified = simplifyPortLabel(value);
-  const simplifiedKey = normalizePortKey(simplified);
-  if (simplifiedKey && byNormalized.has(simplifiedKey)) {
-    return byNormalized.get(simplifiedKey) ?? simplified;
-  }
-
-  for (const port of ports) {
-    const portKey = normalizePortKey(port);
-    if (target.includes(portKey) || portKey.includes(target)) {
-      return port;
-    }
-  }
-
-  return value;
-};
-
-const extractPortFromStatus = (value: string) => {
-  if (!value) return "";
-  const match = value.match(/discharging\s+(.+)/i);
-  if (!match) return value;
-  return match[1].trim();
-};
-
-const defaultDistanceNm = 3000;
-
-const parseDistanceCsv = (csvText: string) => {
-  const lines = csvText.split(/\r?\n/);
-  const distanceMap: Record<string, Record<string, number>> = {};
-  const portSet = new Set<string>();
-
-  for (let i = 1; i < lines.length; i += 1) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const [fromRaw, toRaw, distanceRaw] = line.split(",");
-    if (!fromRaw || !toRaw || !distanceRaw) continue;
-    const from = fromRaw.trim();
-    const to = toRaw.trim();
-    const distance = Number.parseFloat(distanceRaw.trim());
-    if (!Number.isFinite(distance)) continue;
-
-    portSet.add(from);
-    portSet.add(to);
-
-    if (!distanceMap[from]) distanceMap[from] = {};
-    if (!distanceMap[to]) distanceMap[to] = {};
-    distanceMap[from][to] = distance;
-    distanceMap[to][from] = distance;
-  }
-
-  return {
-    distanceMap,
-    ports: Array.from(portSet).sort(),
-  };
-};
-
-const getDistance = (
-  distanceMap: Record<string, Record<string, number>>,
-  from: string,
-  to: string,
-) => {
-  if (from === to) return 0;
-  return distanceMap[from]?.[to] ?? defaultDistanceNm;
-};
-
 export default function ManualCalculationPage() {
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [vessels, setVessels] = useState<VesselOption[]>([]);
@@ -346,12 +281,14 @@ export default function ManualCalculationPage() {
 
           const currentPortRaw = extractPortFromStatus(row.position_status ?? "");
           const currentPort = resolvePortName(currentPortRaw, parsedDistances.ports);
+          const etdDate = (row.etd_date ?? "").trim();
 
           return {
             id: `${source}-${index}`,
             name,
             source,
             currentPort: currentPort || currentPortRaw || "UNKNOWN",
+            etdDate,
             raw: row,
             data: {
               dwt,
@@ -607,6 +544,13 @@ export default function ManualCalculationPage() {
               const vessel = vessels.find((item) => item.id === voyage.vesselId);
               const cargo = cargos.find((item) => item.id === voyage.cargoId);
               const routeLabel = cargo ? `${cargo.loadPort} -> ${cargo.dischargePort}` : "--";
+              const etdDate = vessel?.etdDate ?? "";
+              const etdParsed = parseDateInput(etdDate);
+              const departureParsed = parseDateInput(voyage.departureDate);
+              const isBeforeEtd =
+                etdParsed && departureParsed
+                  ? departureParsed.getTime() < etdParsed.getTime()
+                  : false;
               return (
                 <div key={voyage.id} className="rounded border border-neutral-200 p-3 text-sm">
                   <div className="text-xs font-semibold text-neutral-500">
@@ -646,6 +590,9 @@ export default function ManualCalculationPage() {
                   <div className="mt-2 text-xs text-neutral-600">
                     Ballast start: {vessel?.currentPort ?? "--"}
                   </div>
+                  <div className="mt-2 text-xs text-neutral-600">
+                    Vessel ETD: {formatDateLabel(etdDate)}
+                  </div>
                   <label className="mt-2 block text-sm">
                     <span className="text-neutral-500">Vessel Available / Departure Date</span>
                     <input
@@ -657,6 +604,11 @@ export default function ManualCalculationPage() {
                       }
                     />
                   </label>
+                  {isBeforeEtd ? (
+                    <div className="mt-1 text-xs font-semibold text-red-600">
+                      Departure date is earlier than vessel ETD.
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     className="mt-3 w-full rounded border border-neutral-300 px-3 py-2 text-xs font-semibold hover:border-neutral-400"
@@ -909,3 +861,5 @@ export default function ManualCalculationPage() {
     </main>
   );
 }
+
+
