@@ -1,3 +1,5 @@
+import { getEffectiveProfile, type SpeedBlend } from "./speed";
+
 export type FreightInputs = {
   vessel: {
     dwt: number;
@@ -6,7 +8,15 @@ export type FreightInputs = {
       ballast: number;
       laden: number;
     };
+    speedWarranted: {
+      ballast: number;
+      laden: number;
+    };
     consumption: {
+      ballast: { ifo: number; mdo: number };
+      laden: { ifo: number; mdo: number };
+    };
+    consumptionWarranted: {
       ballast: { ifo: number; mdo: number };
       laden: { ifo: number; mdo: number };
     };
@@ -46,6 +56,7 @@ export type FreightInputs = {
   };
   options: {
     bunkerDays: number;
+    speedBlend: SpeedBlend;
   };
 };
 
@@ -84,9 +95,14 @@ const daysAtSea = (nm: number, speed: number) => (speed > 0 ? nm / speed / 24 : 
 
 export const calculateFreight = (inputs: FreightInputs): FreightOutputs => {
   const { vessel, cargo, distances, costs, options } = inputs;
+  const effectiveProfile = getEffectiveProfile(
+    { speed: vessel.speed, consumption: vessel.consumption },
+    { speed: vessel.speedWarranted, consumption: vessel.consumptionWarranted },
+    options.speedBlend,
+  );
 
-  const ballastDays = daysAtSea(distances.ballastNm, vessel.speed.ballast);
-  const ladenDays = daysAtSea(distances.ladenNm, vessel.speed.laden);
+  const ballastDays = daysAtSea(distances.ballastNm, effectiveProfile.speed.ballast);
+  const ladenDays = daysAtSea(distances.ladenNm, effectiveProfile.speed.laden);
   const steamingDays = ballastDays + ladenDays;
 
   const loadportWorkingDays = cargo.loadRate > 0 ? cargo.cargoQty / cargo.loadRate : 0;
@@ -104,11 +120,11 @@ export const calculateFreight = (inputs: FreightInputs): FreightOutputs => {
   );
 
   const ifoAtSea =
-    ballastDays * vessel.consumption.ballast.ifo +
-    ladenDays * vessel.consumption.laden.ifo;
+    ballastDays * effectiveProfile.consumption.ballast.ifo +
+    ladenDays * effectiveProfile.consumption.laden.ifo;
   const mdoAtSea =
-    ballastDays * vessel.consumption.ballast.mdo +
-    ladenDays * vessel.consumption.laden.mdo;
+    ballastDays * effectiveProfile.consumption.ballast.mdo +
+    ladenDays * effectiveProfile.consumption.laden.mdo;
 
   const portWorkingDays = loadportWorkingDays + disportWorkingDays;
   const ifoInPort =
@@ -177,7 +193,12 @@ export const exampleInputs: FreightInputs = {
     dwt: 62000,
     grainCapacity: 70000,
     speed: { ballast: 14, laden: 12 },
+    speedWarranted: { ballast: 14, laden: 12 },
     consumption: {
+      ballast: { ifo: 23, mdo: 0.1 },
+      laden: { ifo: 18.5, mdo: 0.1 },
+    },
+    consumptionWarranted: {
       ballast: { ifo: 23, mdo: 0.1 },
       laden: { ifo: 18.5, mdo: 0.1 },
     },
@@ -217,5 +238,6 @@ export const exampleInputs: FreightInputs = {
   },
   options: {
     bunkerDays: 1,
+    speedBlend: { ballast: 0.5, laden: 0.75 },
   },
 };

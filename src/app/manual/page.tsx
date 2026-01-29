@@ -10,6 +10,11 @@ import {
   type LaycanWindow,
 } from "../../calculator/laycan";
 import {
+  getQuantityRangeFeasibility,
+  getWeightFeasibility,
+  type QuantityRange,
+} from "../../calculator/weight";
+import {
   defaultDistanceNm,
   extractPortFromStatus,
   getDistance,
@@ -35,6 +40,7 @@ type CargoOption = {
   source: "committed" | "market";
   raw: CsvRow;
   data: FreightInputs["cargo"];
+  quantityRange: QuantityRange | null;
   loadPort: string;
   dischargePort: string;
   portCosts: { load: number; discharge: number };
@@ -138,6 +144,46 @@ const parseFirstNumber = (value: string | undefined | null, fallback = 0) => {
   return match ? toNumber(match[0], fallback) : fallback;
 };
 
+const parseQuantityRange = (
+  value: string | undefined | null,
+  fallbackQty: number,
+): { baseQty: number; range: QuantityRange | null } => {
+  if (!value) return { baseQty: fallbackQty, range: null };
+  const baseQty = parseFirstNumber(value, fallbackQty);
+  const percentMatch = value.match(/([\d.]+)\s*%/);
+  if (percentMatch) {
+    const pct = Number.parseFloat(percentMatch[1]);
+    if (Number.isFinite(pct) && baseQty > 0) {
+      const min = baseQty * (1 - pct / 100);
+      const max = baseQty * (1 + pct / 100);
+      return {
+        baseQty,
+        range: {
+          min,
+          max,
+          label: `${formatNumber(min)} - ${formatNumber(max)} MT`,
+        },
+      };
+    }
+  }
+  const rangeMatch = value.match(/([\d,.]+)\s*(?:-|to)\s*([\d,.]+)/i);
+  if (rangeMatch) {
+    const first = toNumber(rangeMatch[1], baseQty);
+    const second = toNumber(rangeMatch[2], baseQty);
+    const min = Math.min(first, second);
+    const max = Math.max(first, second);
+    return {
+      baseQty,
+      range: {
+        min,
+        max,
+        label: `${formatNumber(min)} - ${formatNumber(max)} MT`,
+      },
+    };
+  }
+  return { baseQty, range: null };
+};
+
 const parsePercent = (value: string | undefined | null, fallback = 0) => {
   if (!value) return fallback;
   const match = value.match(/[\d.]+/);
@@ -215,11 +261,14 @@ export default function ManualCalculationPage() {
       id: string;
       vesselId: string;
       cargoId: string;
+      cargoQty: number;
+      speedBlend: { ballast: number; laden: number };
       departureDate: string;
       result?: ReturnType<typeof calculateFreight>;
       laycanEvaluation?: LaycanEvaluation;
       waitingCost?: number;
       adjustedProfit?: number;
+      weightIssue?: string;
     }>
   >([]);
 
@@ -269,6 +318,30 @@ export default function ManualCalculationPage() {
             row.economical_speed_ballast_mgo_mt,
             exampleInputs.vessel.consumption.ballast.mdo,
           );
+          const warrantedLaden = toNumber(
+            row.warranted_speed_laden_kn,
+            exampleInputs.vessel.speedWarranted.laden,
+          );
+          const warrantedBallast = toNumber(
+            row.warranted_speed_ballast_kn,
+            exampleInputs.vessel.speedWarranted.ballast,
+          );
+          const warrantedLadenVlsfo = toNumber(
+            row.warranted_speed_laden_vlsf_mt,
+            exampleInputs.vessel.consumptionWarranted.laden.ifo,
+          );
+          const warrantedBallastVlsfo = toNumber(
+            row.warranted_speed_ballast_vlsf_mt,
+            exampleInputs.vessel.consumptionWarranted.ballast.ifo,
+          );
+          const warrantedLadenMgo = toNumber(
+            row.warranted_speed_laden_mgo_mt,
+            exampleInputs.vessel.consumptionWarranted.laden.mdo,
+          );
+          const warrantedBallastMgo = toNumber(
+            row.warranted_speed_ballast_mgo_mt,
+            exampleInputs.vessel.consumptionWarranted.ballast.mdo,
+          );
 
           const portIdle = toNumber(
             row.port_consumption_idle_vlsfo_mt_day,
@@ -294,9 +367,14 @@ export default function ManualCalculationPage() {
               dwt,
               grainCapacity: Math.max(dwt, exampleInputs.vessel.grainCapacity),
               speed: { ballast: ecoBallast, laden: ecoLaden },
+              speedWarranted: { ballast: warrantedBallast, laden: warrantedLaden },
               consumption: {
                 ballast: { ifo: ecoBallastVlsfo, mdo: ecoBallastMgo },
                 laden: { ifo: ecoLadenVlsfo, mdo: ecoLadenMgo },
+              },
+              consumptionWarranted: {
+                ballast: { ifo: warrantedBallastVlsfo, mdo: warrantedBallastMgo },
+                laden: { ifo: warrantedLadenVlsfo, mdo: warrantedLadenMgo },
               },
               portConsumption: {
                 working: { ifo: portWorking, mdo: exampleInputs.vessel.portConsumption.working.mdo },
@@ -315,7 +393,10 @@ export default function ManualCalculationPage() {
         const cargosParsed = [...committedRows, ...marketCargoRows].map((row, index) => {
           const source = index < committedRows.length ? "committed" : "market";
           const name = row.route || row.customer || `Cargo ${index + 1}`;
-          const qty = parseFirstNumber(row.quantity, exampleInputs.cargo.cargoQty);
+          const { baseQty, range: quantityRange } = parseQuantityRange(
+            row.quantity,
+            exampleInputs.cargo.cargoQty,
+          );
           const freightRate = toNumber(row.freight_rate ?? "", exampleInputs.cargo.freightRate);
           const loadRate = parseRateFromTerms(row.loading_terms ?? "", exampleInputs.cargo.loadRate);
           const dischargeRate = parseRateFromTerms(row.discharge_terms ?? "", exampleInputs.cargo.dischargeRate);
@@ -336,6 +417,7 @@ export default function ManualCalculationPage() {
             name,
             source,
             raw: row,
+            quantityRange,
             loadPort: loadPort || loadPortRaw || "UNKNOWN",
             dischargePort: dischargePort || dischargePortRaw || "UNKNOWN",
             portCosts,
@@ -343,7 +425,7 @@ export default function ManualCalculationPage() {
             laycanWindow,
             data: {
               ...exampleInputs.cargo,
-              cargoQty: qty,
+              cargoQty: baseQty,
               freightRate,
               loadRate,
               dischargeRate,
@@ -364,6 +446,8 @@ export default function ManualCalculationPage() {
               id: `voyage-1`,
               vesselId: vesselsParsed[0].id,
               cargoId: cargosParsed[0].id,
+              cargoQty: cargosParsed[0].data.cargoQty,
+              speedBlend: { ballast: 0.5, laden: 0.75 },
               departureDate: todayIso,
             },
           ];
@@ -387,7 +471,12 @@ export default function ManualCalculationPage() {
     };
   }, []);
 
-  const getVoyageInputs = (voyage: { vesselId: string; cargoId: string }) => {
+  const getVoyageInputs = (voyage: {
+    vesselId: string;
+    cargoId: string;
+    cargoQty: number;
+    speedBlend: { ballast: number; laden: number };
+  }) => {
     const vessel = vessels.find((item) => item.id === voyage.vesselId);
     const cargo = cargos.find((item) => item.id === voyage.cargoId);
     if (!vessel || !cargo) return undefined;
@@ -395,6 +484,7 @@ export default function ManualCalculationPage() {
     const ladenNm = getDistance(distanceMap, cargo.loadPort, cargo.dischargePort);
     const cargoData: FreightInputs["cargo"] = {
       ...cargo.data,
+      cargoQty: voyage.cargoQty,
       portIdleDays: cargo.data.portIdleDays + portDelayDays,
     };
     return {
@@ -408,7 +498,7 @@ export default function ManualCalculationPage() {
         portDisbLoad: cargo.portCosts.load,
         portDisbDis: cargo.portCosts.discharge,
       },
-      options: { bunkerDays: exampleInputs.options.bunkerDays },
+      options: { bunkerDays: exampleInputs.options.bunkerDays, speedBlend: voyage.speedBlend },
     } satisfies FreightInputs;
   };
 
@@ -436,6 +526,35 @@ export default function ManualCalculationPage() {
         const vessel = vessels.find((item) => item.id === voyage.vesselId);
         const cargo = cargos.find((item) => item.id === voyage.cargoId);
         if (!vessel || !cargo) return voyage;
+        const rangeCheck = getQuantityRangeFeasibility(
+          voyage.cargoQty,
+          cargo.quantityRange,
+        );
+        if (rangeCheck.status === "infeasible") {
+          const rangeReason =
+            rangeCheck.underage > 0
+              ? `Cargo quantity (${formatNumber(voyage.cargoQty)} MT) is below contract minimum (${formatNumber(rangeCheck.min)} MT).`
+              : `Cargo quantity (${formatNumber(voyage.cargoQty)} MT) exceeds contract maximum (${formatNumber(rangeCheck.max)} MT).`;
+          return {
+            ...voyage,
+            result: undefined,
+            laycanEvaluation: undefined,
+            waitingCost: undefined,
+            adjustedProfit: undefined,
+            weightIssue: rangeReason,
+          };
+        }
+        const weightCheck = getWeightFeasibility(voyage.cargoQty, vessel.data.dwt);
+        if (weightCheck.status === "infeasible") {
+          return {
+            ...voyage,
+            result: undefined,
+            laycanEvaluation: undefined,
+            waitingCost: undefined,
+            adjustedProfit: undefined,
+            weightIssue: weightCheck.reason ?? "Cargo quantity exceeds vessel DWT.",
+          };
+        }
         const laycanEvaluation = getLaycanEvaluation(voyage, vessel, cargo);
         if (laycanEvaluation?.status === "infeasible") {
           return {
@@ -444,6 +563,7 @@ export default function ManualCalculationPage() {
             laycanEvaluation,
             waitingCost: undefined,
             adjustedProfit: undefined,
+            weightIssue: undefined,
           };
         }
         const inputs = getVoyageInputs(voyage);
@@ -465,6 +585,7 @@ export default function ManualCalculationPage() {
           laycanEvaluation,
           waitingCost,
           adjustedProfit,
+          weightIssue: undefined,
         };
       }),
     );
@@ -483,6 +604,8 @@ export default function ManualCalculationPage() {
         id: `voyage-${prev.length + 1}`,
         vesselId: vessels[0].id,
         cargoId: cargos[0].id,
+        cargoQty: cargos[0].data.cargoQty,
+        speedBlend: { ballast: 0.5, laden: 0.75 },
         departureDate: todayIso,
       },
     ]);
@@ -494,7 +617,13 @@ export default function ManualCalculationPage() {
 
   const updateVoyage = (
     voyageId: string,
-    updates: Partial<{ vesselId: string; cargoId: string; departureDate: string }>,
+    updates: Partial<{
+      vesselId: string;
+      cargoId: string;
+      cargoQty: number;
+      speedBlend: { ballast: number; laden: number };
+      departureDate: string;
+    }>,
   ) => {
     setVoyages((prev) =>
       prev.map((voyage) =>
@@ -506,6 +635,7 @@ export default function ManualCalculationPage() {
               laycanEvaluation: undefined,
               waitingCost: undefined,
               adjustedProfit: undefined,
+              weightIssue: undefined,
             }
           : voyage,
       ),
@@ -543,7 +673,12 @@ export default function ManualCalculationPage() {
             {voyages.map((voyage, index) => {
               const vessel = vessels.find((item) => item.id === voyage.vesselId);
               const cargo = cargos.find((item) => item.id === voyage.cargoId);
-              const routeLabel = cargo ? `${cargo.loadPort} -> ${cargo.dischargePort}` : "--";
+              const routeLabel =
+                vessel && cargo
+                  ? `${vessel.currentPort} -> ${cargo.loadPort} -> ${cargo.dischargePort}`
+                  : cargo
+                    ? `${cargo.loadPort} -> ${cargo.dischargePort}`
+                    : "--";
               const etdDate = vessel?.etdDate ?? "";
               const etdParsed = parseDateInput(etdDate);
               const departureParsed = parseDateInput(voyage.departureDate);
@@ -551,6 +686,29 @@ export default function ManualCalculationPage() {
                 etdParsed && departureParsed
                   ? departureParsed.getTime() < etdParsed.getTime()
                   : false;
+              const vesselDwt = vessel?.data.dwt ?? 0;
+              const cargoQty = Number.isFinite(voyage.cargoQty)
+                ? voyage.cargoQty
+                : cargo?.data.cargoQty ?? 0;
+              const rangeCheck = cargo
+                ? getQuantityRangeFeasibility(cargoQty, cargo.quantityRange)
+                : undefined;
+              const weightCheck = vessel ? getWeightFeasibility(cargoQty, vesselDwt) : undefined;
+              const ballastNm = vessel && cargo
+                ? getDistance(distanceMap, vessel.currentPort, cargo.loadPort)
+                : defaultDistanceNm;
+              const ladenNm = cargo
+                ? getDistance(distanceMap, cargo.loadPort, cargo.dischargePort)
+                : defaultDistanceNm;
+              const weightPct = vesselDwt > 0 ? Math.min((cargoQty / vesselDwt) * 100, 100) : 0;
+              const isQtyInvalid =
+                rangeCheck?.status === "infeasible" || weightCheck?.status === "infeasible";
+              const rangeReason =
+                rangeCheck?.status === "infeasible"
+                  ? rangeCheck.underage > 0
+                    ? `Cargo quantity (${formatNumber(cargoQty)} MT) is below contract minimum (${formatNumber(rangeCheck.min)} MT).`
+                    : `Cargo quantity (${formatNumber(cargoQty)} MT) exceeds contract maximum (${formatNumber(rangeCheck.max)} MT).`
+                  : "";
               return (
                 <div key={voyage.id} className="rounded border border-neutral-200 p-3 text-sm">
                   <div className="text-xs font-semibold text-neutral-500">
@@ -575,7 +733,13 @@ export default function ManualCalculationPage() {
                     <select
                       className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
                       value={voyage.cargoId}
-                      onChange={(event) => updateVoyage(voyage.id, { cargoId: event.target.value })}
+                      onChange={(event) => {
+                        const nextCargo = cargos.find((option) => option.id === event.target.value);
+                        updateVoyage(voyage.id, {
+                          cargoId: event.target.value,
+                          cargoQty: nextCargo?.data.cargoQty ?? cargoQty,
+                        });
+                      }}
                     >
                       {cargos.map((option) => (
                         <option key={option.id} value={option.id}>
@@ -584,6 +748,129 @@ export default function ManualCalculationPage() {
                       ))}
                     </select>
                   </label>
+                  <div className="mt-2 space-y-2">
+                    <div className="text-sm text-neutral-500">Cargo Quantity (MT)</div>
+                    <input
+                      className="w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={cargoQty}
+                      onChange={(event) =>
+                        updateVoyage(voyage.id, {
+                          cargoQty: Number.isFinite(Number(event.target.value))
+                            ? Number(event.target.value)
+                            : 0,
+                        })
+                      }
+                    />
+                    {cargo?.quantityRange ? (
+                      <div className="text-[11px] text-neutral-500">
+                        Contract: {formatNumber(cargo.data.cargoQty)} MT ±{" "}
+                        {formatNumber(
+                          cargo.data.cargoQty > 0
+                            ? ((cargo.quantityRange.max - cargo.data.cargoQty) / cargo.data.cargoQty) *
+                                100
+                            : 0,
+                        )}
+                        % ({formatNumber(cargo.quantityRange.min)} ~{" "}
+                        {formatNumber(cargo.quantityRange.max)} MT)
+                      </div>
+                    ) : null}
+                    <input
+                      className="w-full accent-emerald-500"
+                      type="range"
+                      min={cargo?.quantityRange?.min ?? 0}
+                      max={cargo?.quantityRange?.max ?? Math.max(vesselDwt, cargoQty)}
+                      step={100}
+                      value={cargoQty}
+                      onChange={(event) =>
+                        updateVoyage(voyage.id, {
+                          cargoQty: Number.isFinite(Number(event.target.value))
+                            ? Number(event.target.value)
+                            : 0,
+                        })
+                      }
+                    />
+                    <div className="flex justify-between text-[11px] text-neutral-900">
+                      <span>{formatNumber(cargoQty)} MT</span>
+                      <span>
+                        {formatNumber(cargo?.quantityRange?.min ?? 0)} ~{" "}
+                        {formatNumber(
+                          cargo?.quantityRange?.max ?? Math.max(vesselDwt, cargoQty),
+                        )}{" "}
+                        MT
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-neutral-900">
+                      Cargo Load vs DWT: {formatNumber(Math.min(cargoQty, vesselDwt))} /{" "}
+                      {formatNumber(vesselDwt)} MT
+                    </div>
+                    {rangeCheck?.status === "infeasible" ? (
+                      <div className="mt-1 text-xs font-semibold text-red-600">
+                        {rangeReason}
+                      </div>
+                    ) : null}
+                    {rangeCheck?.status !== "infeasible" && weightCheck?.status === "infeasible" ? (
+                      <div className="mt-1 text-xs font-semibold text-red-600">
+                        {weightCheck.reason}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs font-semibold text-neutral-600">Ballast Speed Blend</div>
+                    <div className="text-[11px] text-neutral-500">
+                      Ballast leg distance: {formatNumber(ballastNm)} NM
+                    </div>
+                    <input
+                      className="w-full"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={voyage.speedBlend.ballast}
+                      onChange={(event) =>
+                        updateVoyage(voyage.id, {
+                          speedBlend: {
+                            ...voyage.speedBlend,
+                            ballast: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                    <div className="flex justify-between text-[11px] text-neutral-500">
+                      <span>Warranted</span>
+                      <span>{formatNumber(voyage.speedBlend.ballast * 100)}%</span>
+                      <span>Economical</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <div className="text-xs font-semibold text-neutral-600">Laden Speed Blend</div>
+                    <div className="text-[11px] text-neutral-500">
+                      Laden leg distance: {formatNumber(ladenNm)} NM
+                    </div>
+                    <input
+                      className="w-full"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={voyage.speedBlend.laden}
+                      onChange={(event) =>
+                        updateVoyage(voyage.id, {
+                          speedBlend: {
+                            ...voyage.speedBlend,
+                            laden: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                    <div className="flex justify-between text-[11px] text-neutral-500">
+                      <span>Warranted</span>
+                      <span>{formatNumber(voyage.speedBlend.laden * 100)}%</span>
+                      <span>Economical</span>
+                    </div>
+                  </div>
                   <div className="mt-2 text-xs text-neutral-600">
                     Route: {routeLabel}
                   </div>
@@ -693,6 +980,7 @@ export default function ManualCalculationPage() {
             const inputs = voyage.result ? getVoyageInputs(voyage) : undefined;
             const result = voyage.result;
             const laycanEvaluation = voyage.laycanEvaluation;
+            const weightIssue = voyage.weightIssue;
             const laycanStatus =
               laycanEvaluation?.status === "infeasible"
                 ? "Miss Laycan (Infeasible)"
@@ -721,7 +1009,18 @@ export default function ManualCalculationPage() {
                 <h2 className="text-lg font-semibold">
                   Voyage {index + 1}: {vessel?.name ?? "--"} → {cargo?.name ?? "--"}
                 </h2>
-                {!result && laycanEvaluation?.status === "infeasible" ? (
+                {!result && weightIssue ? (
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="font-semibold text-red-600">Infeasible (Quantity)</div>
+                    <div className="grid grid-cols-2 gap-2 text-neutral-600">
+                      <div>Requested Cargo</div>
+                      <div>{formatNumber(voyage.cargoQty)} MT</div>
+                      <div>Vessel DWT</div>
+                      <div>{formatNumber(vessel?.data.dwt ?? 0)} MT</div>
+                    </div>
+                    <div className="text-neutral-500">{weightIssue}</div>
+                  </div>
+                ) : !result && laycanEvaluation?.status === "infeasible" ? (
                   <div className="mt-3 space-y-2 text-xs">
                     <div className="font-semibold text-red-600">{laycanStatus}</div>
                     <div className="grid grid-cols-2 gap-2 text-neutral-600">
@@ -861,5 +1160,6 @@ export default function ManualCalculationPage() {
     </main>
   );
 }
+
 
 
