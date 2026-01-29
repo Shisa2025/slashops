@@ -1066,89 +1066,100 @@ export default function ManualCalculationPage() {
                       <div>{formatMoney(voyage.adjustedProfit ?? result.profit)}</div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-neutral-500">Route</div>
-                      <div>
-                        {cargo?.loadPort ?? "--"} → {cargo?.dischargePort ?? "--"}
-                      </div>
-                      <div className="text-neutral-500">Ballast Start</div>
-                      <div>{vessel?.currentPort ?? "--"}</div>
-                      <div className="text-neutral-500">Ballast (Start â†’ Load) NM</div>
-                      <div>{formatNumber(ballastNm)}</div>
-                      <div className="text-neutral-500">Laden (Load â†’ Discharge) NM</div>
-                      <div>{formatNumber(ladenNm)}</div>
-                      <div className="text-neutral-500">Total NM</div>
-                      <div>{formatNumber(ballastNm + ladenNm)}</div>
-                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <section className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                        <h3 className="text-sm font-semibold text-neutral-700">Info</h3>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="text-neutral-500">Route</div>
+                          <div>
+                            {cargo?.loadPort ?? "--"} → {cargo?.dischargePort ?? "--"}
+                          </div>
+                          <div className="text-neutral-500">Ballast Start</div>
+                          <div>{vessel?.currentPort ?? "--"}</div>
+                          <div className="text-neutral-500">Ballast (Start â†’ Load) NM</div>
+                          <div>{formatNumber(ballastNm)}</div>
+                          <div className="text-neutral-500">Laden (Load â†’ Discharge) NM</div>
+                          <div>{formatNumber(ladenNm)}</div>
+                          <div className="text-neutral-500">Total NM</div>
+                          <div>{formatNumber(ballastNm + ladenNm)}</div>
+                          <div className="text-neutral-500">Total Duration</div>
+                          <div>{formatNumber(result.totalDuration)} days</div>
+                          <div className="text-neutral-500">Steaming Days</div>
+                          <div>{formatNumber(result.steamingDays)} days</div>
+                          <div className="text-neutral-500">Ballast Days</div>
+                          <div>{formatNumber(result.ballastDays)} days</div>
+                          <div className="text-neutral-500">Laden Days</div>
+                          <div>{formatNumber(result.ladenDays)} days</div>
+                          <div className="text-neutral-500">Loadport Days</div>
+                          <div>{formatNumber(result.loadportDays)} days</div>
+                          <div className="text-neutral-500">Disport Days</div>
+                          <div>{formatNumber(result.disportDays)} days</div>
+                          <div className="text-neutral-500">Loaded Qty</div>
+                          <div>{formatNumber(result.loadedQty)} MT</div>
+                          <div className="text-neutral-500">Load Rate</div>
+                          <div>{formatNumber(inputs?.cargo.loadRate ?? 0)} MT/day</div>
+                          <div className="text-neutral-500">Discharge Rate</div>
+                          <div>{formatNumber(inputs?.cargo.dischargeRate ?? 0)} MT/day</div>
+                        </div>
+                        <div className="mt-3 text-xs font-semibold text-neutral-600">
+                          Fuel Consumption
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="text-neutral-500">IFO At Sea</div>
+                          <div>{formatNumber(result.ifoAtSea)} MT</div>
+                          <div className="text-neutral-500">IFO In Port</div>
+                          <div>{formatNumber(result.ifoInPort)} MT</div>
+                          <div className="text-neutral-500">Total IFO</div>
+                          <div>{formatNumber(result.totalIfo)} MT</div>
+                          <div className="text-neutral-500">MDO At Sea</div>
+                          <div>{formatNumber(result.mdoAtSea)} MT</div>
+                          <div className="text-neutral-500">MDO In Port</div>
+                          <div>{formatNumber(result.mdoInPort)} MT</div>
+                          <div className="text-neutral-500">Total MDO</div>
+                          <div>{formatNumber(result.totalMdo)} MT</div>
+                        </div>
+                      </section>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-neutral-500">Total Duration</div>
-                      <div>{formatNumber(result.totalDuration)} days</div>
-                      <div className="text-neutral-500">Steaming Days</div>
-                      <div>{formatNumber(result.steamingDays)} days</div>
-                      <div className="text-neutral-500">Ballast Days</div>
-                      <div>{formatNumber(result.ballastDays)} days</div>
-                      <div className="text-neutral-500">Laden Days</div>
-                      <div>{formatNumber(result.ladenDays)} days</div>
-                      <div className="text-neutral-500">Loadport Days</div>
-                      <div>{formatNumber(result.loadportDays)} days</div>
-                      <div className="text-neutral-500">Disport Days</div>
-                      <div>{formatNumber(result.disportDays)} days</div>
-                      <div className="text-neutral-500">Freight Net</div>
-                      <div>{formatMoney(result.freightNet)}</div>
-                      <div className="text-neutral-500">Total Expenses</div>
-                      <div>{formatMoney(result.totalExpenses)}</div>
-                      <div className="text-neutral-500">Profit</div>
-                      <div>{formatMoney(result.profit)}</div>
-                      <div className="text-neutral-500">TCE</div>
-                      <div>{formatMoney(result.tce)}</div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-neutral-500">Hire (Net)</div>
-                      <div>{formatMoney(result.hireNet)}</div>
-                      <div className="text-neutral-500">Bunker Expense</div>
-                      <div>{formatMoney(result.bunkerExpense)}</div>
-                      <div className="text-neutral-500">Port Disbursements</div>
-                      <div>{formatMoney(result.portDisbursements)}</div>
-                      <div className="text-neutral-500">Operating Expenses</div>
-                      <div>{formatMoney(result.operatingExpenses)}</div>
-                      <div className="text-neutral-500">Misc Expenses</div>
-                      <div>{formatMoney(result.miscExpense)}</div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-neutral-500">Freight Gross</div>
-                      <div>{formatMoney(result.freightGross)}</div>
-                      <div className="text-neutral-500">Freight Commissions</div>
-                      <div>{formatMoney(result.freightCommissions)}</div>
-                      <div className="text-neutral-500">Revenue Net</div>
-                      <div>{formatMoney(result.revenueNet)}</div>
-                      <div className="text-neutral-500">Hire Gross</div>
-                      <div>{formatMoney(result.hireGross)}</div>
-                      <div className="text-neutral-500">Hire Commissions</div>
-                      <div>{formatMoney(result.hireCommissions)}</div>
-                      <div className="text-neutral-500">Loaded Qty</div>
-                      <div>{formatNumber(result.loadedQty)} MT</div>
-                      <div className="text-neutral-500">Load Rate</div>
-                      <div>{formatNumber(inputs?.cargo.loadRate ?? 0)} MT/day</div>
-                      <div className="text-neutral-500">Discharge Rate</div>
-                      <div>{formatNumber(inputs?.cargo.dischargeRate ?? 0)} MT/day</div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-neutral-500">IFO At Sea</div>
-                      <div>{formatNumber(result.ifoAtSea)} MT</div>
-                      <div className="text-neutral-500">IFO In Port</div>
-                      <div>{formatNumber(result.ifoInPort)} MT</div>
-                      <div className="text-neutral-500">Total IFO</div>
-                      <div>{formatNumber(result.totalIfo)} MT</div>
-                      <div className="text-neutral-500">MDO At Sea</div>
-                      <div>{formatNumber(result.mdoAtSea)} MT</div>
-                      <div className="text-neutral-500">MDO In Port</div>
-                      <div>{formatNumber(result.mdoInPort)} MT</div>
-                      <div className="text-neutral-500">Total MDO</div>
-                      <div>{formatNumber(result.totalMdo)} MT</div>
+                      <section className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                        <h3 className="text-sm font-semibold text-neutral-700">Revenue & Cost</h3>
+                        <div className="mt-2 text-xs font-semibold text-neutral-600">Revenue</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="text-neutral-500">Freight Gross</div>
+                          <div>{formatMoney(result.freightGross)}</div>
+                          <div className="text-neutral-500">Freight Commissions</div>
+                          <div>{formatMoney(result.freightCommissions)}</div>
+                          <div className="text-neutral-500">Freight Net</div>
+                          <div>{formatMoney(result.freightNet)}</div>
+                          <div className="text-neutral-500">Revenue Net</div>
+                          <div>{formatMoney(result.revenueNet)}</div>
+                          <div className="text-neutral-500">Hire Gross</div>
+                          <div>{formatMoney(result.hireGross)}</div>
+                          <div className="text-neutral-500">Hire Commissions</div>
+                          <div>{formatMoney(result.hireCommissions)}</div>
+                          <div className="text-neutral-500">Hire (Net)</div>
+                          <div>{formatMoney(result.hireNet)}</div>
+                        </div>
+                        <div className="mt-3 text-xs font-semibold text-neutral-600">Cost</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="text-neutral-500">Total Expenses</div>
+                          <div>{formatMoney(result.totalExpenses)}</div>
+                          <div className="text-neutral-500">Bunker Expense</div>
+                          <div>{formatMoney(result.bunkerExpense)}</div>
+                          <div className="text-neutral-500">Port Disbursements</div>
+                          <div>{formatMoney(result.portDisbursements)}</div>
+                          <div className="text-neutral-500">Operating Expenses</div>
+                          <div>{formatMoney(result.operatingExpenses)}</div>
+                          <div className="text-neutral-500">Misc Expenses</div>
+                          <div>{formatMoney(result.miscExpense)}</div>
+                        </div>
+                        <div className="mt-3 text-xs font-semibold text-neutral-600">Summary</div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="text-neutral-500">Profit</div>
+                          <div>{formatMoney(result.profit)}</div>
+                          <div className="text-neutral-500">TCE</div>
+                          <div>{formatMoney(result.tce)}</div>
+                        </div>
+                      </section>
                     </div>
                   </div>
                 )}
@@ -1160,6 +1171,7 @@ export default function ManualCalculationPage() {
     </main>
   );
 }
+
 
 
 
