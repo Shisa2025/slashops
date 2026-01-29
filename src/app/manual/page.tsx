@@ -2,6 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { calculateFreight, exampleInputs, type FreightInputs } from "../../calculator/freightCalculator";
+import {
+  evaluateLaycan,
+  parseDateInput,
+  parseLaycanRange,
+  type LaycanEvaluation,
+  type LaycanWindow,
+} from "../../calculator/laycan";
 
 type CsvRow = Record<string, string>;
 
@@ -23,6 +30,8 @@ type CargoOption = {
   loadPort: string;
   dischargePort: string;
   portCosts: { load: number; discharge: number };
+  laycanWindow: LaycanWindow | null;
+  laycanLabel: string;
 };
 
 const formatMoney = (value: number) =>
@@ -255,6 +264,7 @@ const getDistance = (
 };
 
 export default function ManualCalculationPage() {
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [vessels, setVessels] = useState<VesselOption[]>([]);
   const [cargos, setCargos] = useState<CargoOption[]>([]);
   const [ports, setPorts] = useState<string[]>([]);
@@ -270,7 +280,11 @@ export default function ManualCalculationPage() {
       id: string;
       vesselId: string;
       cargoId: string;
+      departureDate: string;
       result?: ReturnType<typeof calculateFreight>;
+      laycanEvaluation?: LaycanEvaluation;
+      waitingCost?: number;
+      adjustedProfit?: number;
     }>
   >([]);
 
@@ -377,6 +391,8 @@ export default function ManualCalculationPage() {
           const loadPort = resolvePortName(loadPortRaw, parsedDistances.ports);
           const dischargePort = resolvePortName(dischargePortRaw, parsedDistances.ports);
           const portCosts = parsePortCosts(row.port_cost ?? "", baseCosts.portDisbLoad, baseCosts.portDisbDis);
+          const laycanLabel = row.laycan ?? "";
+          const laycanWindow = parseLaycanRange(laycanLabel);
 
           return {
             id: `${source}-${index}`,
@@ -386,6 +402,8 @@ export default function ManualCalculationPage() {
             loadPort: loadPort || loadPortRaw || "UNKNOWN",
             dischargePort: dischargePort || dischargePortRaw || "UNKNOWN",
             portCosts,
+            laycanLabel,
+            laycanWindow,
             data: {
               ...exampleInputs.cargo,
               cargoQty: qty,
@@ -409,6 +427,7 @@ export default function ManualCalculationPage() {
               id: `voyage-1`,
               vesselId: vesselsParsed[0].id,
               cargoId: cargosParsed[0].id,
+              departureDate: todayIso,
             },
           ];
         });
@@ -456,14 +475,60 @@ export default function ManualCalculationPage() {
     } satisfies FreightInputs;
   };
 
+  const getLaycanEvaluation = (
+    voyage: { vesselId: string; cargoId: string; departureDate: string },
+    vessel: VesselOption,
+    cargo: CargoOption,
+  ) => {
+    if (!cargo.laycanWindow) return undefined;
+    const departureDate = parseDateInput(voyage.departureDate);
+    if (!departureDate) return undefined;
+    const ballastNm = getDistance(distanceMap, vessel.currentPort, cargo.loadPort);
+    return evaluateLaycan({
+      departureDate,
+      ballastNm,
+      ballastSpeed: vessel.data.speed.ballast,
+      laycan: cargo.laycanWindow,
+    });
+  };
+
   const calculateVoyage = (voyageId: string) => {
     setVoyages((prev) =>
       prev.map((voyage) => {
         if (voyage.id !== voyageId) return voyage;
+        const vessel = vessels.find((item) => item.id === voyage.vesselId);
+        const cargo = cargos.find((item) => item.id === voyage.cargoId);
+        if (!vessel || !cargo) return voyage;
+        const laycanEvaluation = getLaycanEvaluation(voyage, vessel, cargo);
+        if (laycanEvaluation?.status === "infeasible") {
+          return {
+            ...voyage,
+            result: undefined,
+            laycanEvaluation,
+            waitingCost: undefined,
+            adjustedProfit: undefined,
+          };
+        }
         const inputs = getVoyageInputs(voyage);
         if (!inputs) return voyage;
         const result = calculateFreight(inputs);
-        return { ...voyage, result };
+        let waitingCost = 0;
+        if (laycanEvaluation?.status === "early" && laycanEvaluation.waitingDays > 0) {
+          const waitingHireCost = laycanEvaluation.waitingDays * vessel.data.dailyHire;
+          const waitingFuelCost =
+            laycanEvaluation.waitingDays *
+            (vessel.data.portConsumption.idle.ifo * bunkerPrices.ifo +
+              vessel.data.portConsumption.idle.mdo * bunkerPrices.mdo);
+          waitingCost = waitingHireCost + waitingFuelCost;
+        }
+        const adjustedProfit = result.profit - waitingCost;
+        return {
+          ...voyage,
+          result,
+          laycanEvaluation,
+          waitingCost,
+          adjustedProfit,
+        };
       }),
     );
   };
@@ -481,14 +546,31 @@ export default function ManualCalculationPage() {
         id: `voyage-${prev.length + 1}`,
         vesselId: vessels[0].id,
         cargoId: cargos[0].id,
+        departureDate: todayIso,
       },
     ]);
   };
 
-  const updateVoyage = (voyageId: string, updates: Partial<{ vesselId: string; cargoId: string }>) => {
+  const removeVoyage = (voyageId: string) => {
+    setVoyages((prev) => prev.filter((voyage) => voyage.id !== voyageId));
+  };
+
+  const updateVoyage = (
+    voyageId: string,
+    updates: Partial<{ vesselId: string; cargoId: string; departureDate: string }>,
+  ) => {
     setVoyages((prev) =>
       prev.map((voyage) =>
-        voyage.id === voyageId ? { ...voyage, ...updates, result: undefined } : voyage,
+        voyage.id === voyageId
+          ? {
+              ...voyage,
+              ...updates,
+              result: undefined,
+              laycanEvaluation: undefined,
+              waitingCost: undefined,
+              adjustedProfit: undefined,
+            }
+          : voyage,
       ),
     );
   };
@@ -564,6 +646,17 @@ export default function ManualCalculationPage() {
                   <div className="mt-2 text-xs text-neutral-600">
                     Ballast start: {vessel?.currentPort ?? "--"}
                   </div>
+                  <label className="mt-2 block text-sm">
+                    <span className="text-neutral-500">Vessel Available / Departure Date</span>
+                    <input
+                      className="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm"
+                      type="date"
+                      value={voyage.departureDate}
+                      onChange={(event) =>
+                        updateVoyage(voyage.id, { departureDate: event.target.value })
+                      }
+                    />
+                  </label>
                   <button
                     type="button"
                     className="mt-3 w-full rounded border border-neutral-300 px-3 py-2 text-xs font-semibold hover:border-neutral-400"
@@ -571,6 +664,13 @@ export default function ManualCalculationPage() {
                     disabled={!vessel || !cargo}
                   >
                     Calculate
+                  </button>
+                  <button
+                    type="button"
+                    className="mt-2 w-full rounded border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-300"
+                    onClick={() => removeVoyage(voyage.id)}
+                  >
+                    Delete
                   </button>
                 </div>
               );
@@ -640,23 +740,81 @@ export default function ManualCalculationPage() {
             const cargo = cargos.find((item) => item.id === voyage.cargoId);
             const inputs = voyage.result ? getVoyageInputs(voyage) : undefined;
             const result = voyage.result;
+            const laycanEvaluation = voyage.laycanEvaluation;
+            const laycanStatus =
+              laycanEvaluation?.status === "infeasible"
+                ? "Miss Laycan (Infeasible)"
+                : laycanEvaluation?.status === "early"
+                  ? `Early arrival - waiting ${formatNumber(laycanEvaluation.waitingDays)} days`
+                  : laycanEvaluation?.status === "feasible"
+                    ? "Feasible"
+                    : "Laycan unavailable";
             const ballastNm =
               vessel && cargo
                 ? getDistance(distanceMap, vessel.currentPort, cargo.loadPort)
                 : defaultDistanceNm;
             const ladenNm =
               cargo ? getDistance(distanceMap, cargo.loadPort, cargo.dischargePort) : defaultDistanceNm;
+            const formatDate = (date?: Date) =>
+              date
+                ? date.toLocaleDateString("en-US", {
+                    timeZone: "UTC",
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })
+                : "--";
             return (
               <section key={voyage.id} className="rounded-lg border border-neutral-200 p-4 text-sm">
                 <h2 className="text-lg font-semibold">
                   Voyage {index + 1}: {vessel?.name ?? "--"} → {cargo?.name ?? "--"}
                 </h2>
-                {!result ? (
+                {!result && laycanEvaluation?.status === "infeasible" ? (
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="font-semibold text-red-600">{laycanStatus}</div>
+                    <div className="grid grid-cols-2 gap-2 text-neutral-600">
+                      <div>Laycan Window</div>
+                      <div>{cargo?.laycanLabel ?? "--"}</div>
+                      <div>ETA at Load Port</div>
+                      <div>{formatDate(laycanEvaluation.eta)}</div>
+                    </div>
+                    <div className="text-neutral-500">
+                      Voyage is infeasible due to laycan miss. Adjust departure date.
+                    </div>
+                  </div>
+                ) : !result ? (
                   <div className="mt-3 text-xs text-neutral-500">
                     Click Calculate to generate results.
                   </div>
                 ) : (
                   <div className="mt-4 space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">Laycan Window</div>
+                      <div>{cargo?.laycanLabel ?? "--"}</div>
+                      <div className="text-neutral-500">ETA at Load Port</div>
+                      <div>{formatDate(laycanEvaluation?.eta)}</div>
+                      <div className="text-neutral-500">Feasibility</div>
+                      <div
+                        className={
+                          laycanEvaluation?.status === "infeasible"
+                            ? "font-semibold text-red-600"
+                            : "font-semibold text-green-600"
+                        }
+                      >
+                        {laycanStatus}
+                      </div>
+                      <div className="text-neutral-500">Waiting Days</div>
+                      <div>
+                        {laycanEvaluation?.status === "early"
+                          ? `${formatNumber(laycanEvaluation.waitingDays)} days`
+                          : "0 days"}
+                      </div>
+                      <div className="text-neutral-500">Waiting Cost</div>
+                      <div>{formatMoney(voyage.waitingCost ?? 0)}</div>
+                      <div className="text-neutral-500">Adjusted Profit</div>
+                      <div>{formatMoney(voyage.adjustedProfit ?? result.profit)}</div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2">
                       <div className="text-neutral-500">Route</div>
                       <div>
@@ -675,6 +833,16 @@ export default function ManualCalculationPage() {
                     <div className="grid grid-cols-2 gap-2">
                       <div className="text-neutral-500">Total Duration</div>
                       <div>{formatNumber(result.totalDuration)} days</div>
+                      <div className="text-neutral-500">Steaming Days</div>
+                      <div>{formatNumber(result.steamingDays)} days</div>
+                      <div className="text-neutral-500">Ballast Days</div>
+                      <div>{formatNumber(result.ballastDays)} days</div>
+                      <div className="text-neutral-500">Laden Days</div>
+                      <div>{formatNumber(result.ladenDays)} days</div>
+                      <div className="text-neutral-500">Loadport Days</div>
+                      <div>{formatNumber(result.loadportDays)} days</div>
+                      <div className="text-neutral-500">Disport Days</div>
+                      <div>{formatNumber(result.disportDays)} days</div>
                       <div className="text-neutral-500">Freight Net</div>
                       <div>{formatMoney(result.freightNet)}</div>
                       <div className="text-neutral-500">Total Expenses</div>
@@ -694,15 +862,42 @@ export default function ManualCalculationPage() {
                       <div>{formatMoney(result.portDisbursements)}</div>
                       <div className="text-neutral-500">Operating Expenses</div>
                       <div>{formatMoney(result.operatingExpenses)}</div>
+                      <div className="text-neutral-500">Misc Expenses</div>
+                      <div>{formatMoney(result.miscExpense)}</div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">Freight Gross</div>
+                      <div>{formatMoney(result.freightGross)}</div>
+                      <div className="text-neutral-500">Freight Commissions</div>
+                      <div>{formatMoney(result.freightCommissions)}</div>
+                      <div className="text-neutral-500">Revenue Net</div>
+                      <div>{formatMoney(result.revenueNet)}</div>
+                      <div className="text-neutral-500">Hire Gross</div>
+                      <div>{formatMoney(result.hireGross)}</div>
+                      <div className="text-neutral-500">Hire Commissions</div>
+                      <div>{formatMoney(result.hireCommissions)}</div>
                       <div className="text-neutral-500">Loaded Qty</div>
                       <div>{formatNumber(result.loadedQty)} MT</div>
                       <div className="text-neutral-500">Load Rate</div>
                       <div>{formatNumber(inputs?.cargo.loadRate ?? 0)} MT/day</div>
                       <div className="text-neutral-500">Discharge Rate</div>
                       <div>{formatNumber(inputs?.cargo.dischargeRate ?? 0)} MT/day</div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="text-neutral-500">IFO At Sea</div>
+                      <div>{formatNumber(result.ifoAtSea)} MT</div>
+                      <div className="text-neutral-500">IFO In Port</div>
+                      <div>{formatNumber(result.ifoInPort)} MT</div>
+                      <div className="text-neutral-500">Total IFO</div>
+                      <div>{formatNumber(result.totalIfo)} MT</div>
+                      <div className="text-neutral-500">MDO At Sea</div>
+                      <div>{formatNumber(result.mdoAtSea)} MT</div>
+                      <div className="text-neutral-500">MDO In Port</div>
+                      <div>{formatNumber(result.mdoInPort)} MT</div>
+                      <div className="text-neutral-500">Total MDO</div>
+                      <div>{formatNumber(result.totalMdo)} MT</div>
                     </div>
                   </div>
                 )}
