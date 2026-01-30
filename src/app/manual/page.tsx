@@ -1124,6 +1124,8 @@ export default function ManualCalculationPage() {
                         <h3 className="text-sm font-semibold text-neutral-700">Revenue & Cost</h3>
                         <div className="mt-2 text-xs font-semibold text-neutral-600">Revenue</div>
                         <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="text-neutral-500">Freight Rate</div>
+                          <div>{formatMoney(inputs?.cargo.freightRate ?? 0)}/MT</div>
                           <div className="text-neutral-500">Freight Gross</div>
                           <div>{formatMoney(result.freightGross)}</div>
                           <div className="text-neutral-500">Freight Commissions</div>
