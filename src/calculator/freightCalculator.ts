@@ -207,7 +207,7 @@ export const exampleInputs: FreightInputs = {
       idle: { ifo: 5.5, mdo: 0.1 },
     },
     dailyHire: 12000,
-    adComsPct: 0.0375,
+    adComsPct: 0,
   },
   cargo: {
     cargoQty: 60500,
