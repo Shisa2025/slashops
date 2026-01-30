@@ -365,7 +365,7 @@ export default function ManualCalculationPage() {
             raw: row,
             data: {
               dwt,
-              grainCapacity: Math.max(dwt, exampleInputs.vessel.grainCapacity),
+              grainCapacity: dwt,
               speed: { ballast: ecoBallast, laden: ecoLaden },
               speedWarranted: { ballast: warrantedBallast, laden: warrantedLaden },
               consumption: {
@@ -766,7 +766,7 @@ export default function ManualCalculationPage() {
                     />
                     {cargo?.quantityRange ? (
                       <div className="text-[11px] text-neutral-500">
-                        Contract: {formatNumber(cargo.data.cargoQty)} MT ±{" "}
+                        Contract: {formatNumber(cargo.data.cargoQty)} MT +/-{" "}
                         {formatNumber(
                           cargo.data.cargoQty > 0
                             ? ((cargo.quantityRange.max - cargo.data.cargoQty) / cargo.data.cargoQty) *
@@ -1007,7 +1007,7 @@ export default function ManualCalculationPage() {
             return (
               <section key={voyage.id} className="rounded-lg border border-neutral-200 p-4 text-sm">
                 <h2 className="text-lg font-semibold">
-                  Voyage {index + 1}: {vessel?.name ?? "--"} → {cargo?.name ?? "--"}
+                  Voyage {index + 1}: {vessel?.name ?? "--"} to {cargo?.name ?? "--"}
                 </h2>
                 {!result && weightIssue ? (
                   <div className="mt-3 space-y-2 text-xs">
@@ -1072,13 +1072,13 @@ export default function ManualCalculationPage() {
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           <div className="text-neutral-500">Route</div>
                           <div>
-                            {cargo?.loadPort ?? "--"} → {cargo?.dischargePort ?? "--"}
+                            {cargo?.loadPort ?? "--"} to {cargo?.dischargePort ?? "--"}
                           </div>
                           <div className="text-neutral-500">Ballast Start</div>
                           <div>{vessel?.currentPort ?? "--"}</div>
-                          <div className="text-neutral-500">Ballast (Start â†’ Load) NM</div>
+                          <div className="text-neutral-500">Ballast (Start to Load) NM</div>
                           <div>{formatNumber(ballastNm)}</div>
-                          <div className="text-neutral-500">Laden (Load â†’ Discharge) NM</div>
+                          <div className="text-neutral-500">Laden (Load to Discharge) NM</div>
                           <div>{formatNumber(ladenNm)}</div>
                           <div className="text-neutral-500">Total NM</div>
                           <div>{formatNumber(ballastNm + ladenNm)}</div>
@@ -1173,6 +1173,9 @@ export default function ManualCalculationPage() {
     </main>
   );
 }
+
+
+
 
 
 

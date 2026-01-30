@@ -113,11 +113,7 @@ export const calculateFreight = (inputs: FreightInputs): FreightOutputs => {
   const totalDuration =
     steamingDays + options.bunkerDays + loadportDays + disportDays;
 
-  const loadedQty = Math.min(
-    cargo.cargoQty,
-    vessel.grainCapacity / cargo.stowFactor,
-    vessel.dwt,
-  );
+  const loadedQty = Math.min(cargo.cargoQty, vessel.dwt);
 
   const ifoAtSea =
     ballastDays * effectiveProfile.consumption.ballast.ifo +

@@ -48,6 +48,11 @@ type BestPortfolioSummary = {
   context: string;
 };
 
+type TopkJson = {
+  diff?: { one_sentence?: string; summary?: string };
+  top1_top2_diff?: { summary?: string; one_sentence?: string };
+};
+
 type PairResult = ReturnType<typeof calculateFreight> & {
   adjustedProfit: number;
   waitingCost: number;
@@ -566,7 +571,7 @@ const computeBestPortfolioSummary = async (): Promise<BestPortfolioSummary> => {
       etdDate,
       data: {
         dwt,
-        grainCapacity: Math.max(dwt, exampleInputs.vessel.grainCapacity),
+        grainCapacity: dwt,
         speed: { ballast: ecoBallast, laden: ecoLaden },
         speedWarranted: { ballast: warrantedBallast, laden: warrantedLaden },
         consumption: {
@@ -790,7 +795,7 @@ const computeBestPortfolioSummary = async (): Promise<BestPortfolioSummary> => {
 
   const usedAssignments = chosen.filter((item) => item.cargo && item.pair);
   const reportLines = [
-    "# BEST_PORTFOLIO — Optimal Vessel–Cargo Assignments",
+    "# BEST_PORTFOLIO - Optimal Vessel-Cargo Assignments",
     "",
     "## Summary",
     `- Total profit: ${formatMoney(totalProfit)}`,
@@ -800,7 +805,7 @@ const computeBestPortfolioSummary = async (): Promise<BestPortfolioSummary> => {
     "## Assumptions",
     `- Default bunker prices: IFO ${formatMoney(exampleInputs.costs.ifoPrice)}/MT, MDO ${formatMoney(exampleInputs.costs.mdoPrice)}/MT`,
     `- Distance fallback: ${formatNumber(defaultDistanceNm)} nm when no port_distance match`,
-    "- Speed blend: searched 0.00–1.00 in 1% steps (0=warranted, 1=economical)",
+    "- Speed blend: searched 0.00-1.00 in 1% steps (0=warranted, 1=economical)",
     "- Laycan: feasible or early only; miss is excluded; early adds waiting cost",
     "",
     "## Filters applied",
@@ -936,7 +941,7 @@ const computeBestPlanSummary = async (): Promise<BestPlanSummary> => {
       etdDate,
       data: {
         dwt,
-        grainCapacity: Math.max(dwt, exampleInputs.vessel.grainCapacity),
+        grainCapacity: dwt,
         speed: { ballast: ecoBallast, laden: ecoLaden },
         speedWarranted: { ballast: warrantedBallast, laden: warrantedLaden },
         consumption: {
@@ -1244,6 +1249,8 @@ const extractReply = (data: any) => {
   return typeof outputText === "string" ? outputText : "";
 };
 
+const stripDoubleAsterisks = (text: string) => text.replace(/\*\*/g, "");
+
 export async function POST(req: Request) {
   const missingEnv = [
     "BEDROCK_BASE_URL",
@@ -1325,16 +1332,31 @@ export async function POST(req: Request) {
     const knowledgeDir = path.join(process.cwd(), "knowledge");
     const publicDir = path.join(process.cwd(), "public");
     const calculatorDir = path.join(process.cwd(), "src", "calculator");
-    const dataDir = path.join(process.cwd(), "data");
+    const dataDir = path.join(process.cwd(), "knowledge");
 
     const bestPlan = await safeRead("best plan", computeBestPlanSummary, null);
     const bestPortfolio = await safeRead("best portfolio", computeBestPortfolioSummary, null);
 
-    const knowledgeFiles = await safeRead(
+    const knowledgeFilesRaw = await safeRead(
       "knowledge",
       () => readDirectoryFiles(knowledgeDir, [".md", ".txt"], 12000, 20),
       [],
     );
+    const knowledgePriority = [
+      "knowledge/system.md",
+      "knowledge/portfolio.md",
+      "knowledge/product.md",
+      "knowledge/faq.md",
+    ];
+    const knowledgeFiles = [
+      ...knowledgePriority
+        .map((path) => knowledgeFilesRaw.find((file) => file.path.replace(/\\/g, "/") === path))
+        .filter((file): file is { path: string; content: string } => Boolean(file)),
+      ...knowledgeFilesRaw.filter(
+        (file) =>
+          !knowledgePriority.includes(file.path.replace(/\\/g, "/"))
+      ),
+    ];
     const publicFiles = await safeRead(
       "public",
       () => readDirectoryFiles(publicDir, [".md", ".txt", ".csv"], 12000, 40),
@@ -1347,12 +1369,60 @@ export async function POST(req: Request) {
     );
 
     const traceJson = await safeReadJson(path.join(dataDir, "portfolio_trace.json"), null);
-    const topkJson = await safeReadJson(path.join(dataDir, "topk_portfolios.json"), null);
+    const topkJson = await safeReadJson<TopkJson | null>(
+      path.join(dataDir, "topk_portfolios.json"),
+      null,
+    );
     const thresholdsJson = await safeReadJson(path.join(dataDir, "thresholds.json"), null);
+    const extractPortfolioSignalsFromKnowledge = (
+      files: Array<{ path: string; content: string }>
+    ) => {
+      const text = files.map((file) => file.content).join("\n");
+      const matchLine = (key: string) => {
+        const pattern = new RegExp(`^\\s*${key}\\s*:\\s*(.+)$`, "mi");
+        const match = text.match(pattern);
+        return match ? match[1].trim() : null;
+      };
+
+      const traceSummary = matchLine("TRACE_SUMMARY");
+      const top1Top2OneSentence = matchLine("TOP1_TOP2_ONE_SENTENCE");
+      const top1Top2KeyDeltas = matchLine("TOP1_TOP2_KEY_DELTAS");
+      const thresholdBunker = matchLine("THRESHOLD_BUNKER");
+      const thresholdDelay = matchLine("THRESHOLD_DELAY");
+
+      return {
+        traceSummary,
+        top1Top2OneSentence,
+        top1Top2KeyDeltas,
+        thresholdBunker,
+        thresholdDelay,
+      };
+    };
+    const knowledgeSignals = extractPortfolioSignalsFromKnowledge(knowledgeFiles);
     const portfolioContextPack = buildPortfolioContextPack({
-      trace: traceJson,
-      topk: topkJson,
-      thresholds: thresholdsJson,
+      trace:
+        traceJson ??
+        (knowledgeSignals.traceSummary
+          ? { summary: knowledgeSignals.traceSummary }
+          : null),
+      topk:
+        topkJson ??
+        (knowledgeSignals.top1Top2OneSentence || knowledgeSignals.top1Top2KeyDeltas
+          ? {
+              diff: {
+                one_sentence: knowledgeSignals.top1Top2OneSentence ?? undefined,
+                key_deltas: knowledgeSignals.top1Top2KeyDeltas ?? undefined,
+              },
+            }
+          : null),
+      thresholds:
+        thresholdsJson ??
+        (knowledgeSignals.thresholdBunker || knowledgeSignals.thresholdDelay
+          ? {
+              bunker: knowledgeSignals.thresholdBunker ?? undefined,
+              delay: knowledgeSignals.thresholdDelay ?? undefined,
+            }
+          : null),
     });
 
     const buildContextBlock = (title: string, files: Array<{ path: string; content: string }>) => {
@@ -1366,9 +1436,49 @@ export async function POST(req: Request) {
       ].join("\n");
     };
 
+    const extractContextValue = (pack: string, key: string) => {
+      const match = pack.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+      return match ? match[1].trim() : "MISSING";
+    };
+
+    const buildPortfolioEvidenceBlock = () => {
+      const traceSummary = extractContextValue(portfolioContextPack, "TRACE_SUMMARY");
+      const top1Top2OneSentence = extractContextValue(portfolioContextPack, "TOP1_TOP2_ONE_SENTENCE");
+      const top1Top2KeyDeltas = extractContextValue(portfolioContextPack, "TOP1_TOP2_KEY_DELTAS");
+      const thresholdBunker = extractContextValue(portfolioContextPack, "THRESHOLD_BUNKER");
+      const thresholdDelay = extractContextValue(portfolioContextPack, "THRESHOLD_DELAY");
+
+      return [
+        "PORTFOLIO_EVIDENCE:",
+        `TRACE_SUMMARY: ${traceSummary}`,
+        `TOP1_TOP2_ONE_SENTENCE: ${top1Top2OneSentence}`,
+        `TOP1_TOP2_KEY_DELTAS: ${top1Top2KeyDeltas}`,
+        `THRESHOLD_BUNKER: ${thresholdBunker}`,
+        `THRESHOLD_DELAY: ${thresholdDelay}`,
+      ].join("\n");
+    };
+
+    const ensurePortfolioCitations = (reply: string) => {
+      const requiredKeys = [
+        "TRACE_SUMMARY",
+        "TOP1_TOP2_ONE_SENTENCE",
+        "TOP1_TOP2_KEY_DELTAS",
+        "THRESHOLD_BUNKER",
+        "THRESHOLD_DELAY",
+      ];
+      const hasAll = requiredKeys.every((key) => reply.includes(key));
+      if (hasAll) return reply;
+      const evidenceBlock = buildPortfolioEvidenceBlock();
+      const trimmed = reply.trim();
+      if (!trimmed) return evidenceBlock;
+      return `${trimmed}\n\n${evidenceBlock}`;
+    };
+
     const systemContent = [
       "You are a helpful assistant for the SlashOps prototype.",
       "Use the provided knowledge and data to answer user questions.",
+      "Do not use any ** (double asterisk) formatting in responses.",
+      "When users ask for best plans or profitability, respond with the full portfolio combination (multi-vessel assignments), not a single voyage.",
       "If data is missing or truncated, say so clearly.",
       "When answering judge questions about BEST_PORTFOLIO, explicitly cite TRACE_SUMMARY, TOP1_TOP2_ONE_SENTENCE, TOP1_TOP2_KEY_DELTAS, THRESHOLD_BUNKER, THRESHOLD_DELAY from PORTFOLIO_CONTEXT_PACK. Do not invent missing values.",
       bestPlan ? `\n${bestPlan.context}\n` : "\nBEST_PLAN: unavailable\n",
@@ -1385,13 +1495,16 @@ export async function POST(req: Request) {
     const bestPlanTrigger =
       /most\s+profitable|highest\s+profit|best\s+plan|best\s+voyage|most profitable plan|best voyage|best plan/i;
     const whyNotSecondTrigger = /why\s+not\s+second|why\s+not\s+2nd|why\s+second|why\s+not\s+top\s*2/i;
+    const portfolioCitationTrigger = (text: string) =>
+      bestPortfolioTrigger.test(text) || whyNotSecondTrigger.test(text);
 
     if (whyNotSecondTrigger.test(message)) {
       const hasDiff =
-        topkJson &&
-        (topkJson?.diff?.one_sentence ||
-          topkJson?.top1_top2_diff?.summary ||
-          topkJson?.top1_top2_diff?.one_sentence);
+        !!topkJson &&
+        (topkJson.diff?.one_sentence ||
+          topkJson.diff?.summary ||
+          topkJson.top1_top2_diff?.summary ||
+          topkJson.top1_top2_diff?.one_sentence);
       if (!hasDiff) {
         return NextResponse.json({
           reply:
@@ -1400,10 +1513,17 @@ export async function POST(req: Request) {
       }
     }
     if (bestPortfolio && bestPortfolioTrigger.test(message)) {
-      return NextResponse.json({ reply: bestPortfolio.reply });
+      const reply = stripDoubleAsterisks(bestPortfolio.reply);
+      return NextResponse.json({ reply: ensurePortfolioCitations(reply) });
     }
-    if (bestPlan && bestPlanTrigger.test(message)) {
-      return NextResponse.json({ reply: bestPlan.reply });
+    if (bestPlanTrigger.test(message)) {
+      if (bestPortfolio) {
+        const reply = stripDoubleAsterisks(bestPortfolio.reply);
+        return NextResponse.json({ reply: ensurePortfolioCitations(reply) });
+      }
+      if (bestPlan) {
+        return NextResponse.json({ reply: stripDoubleAsterisks(bestPlan.reply) });
+      }
     }
     try {
       const upstream = await fetch(endpoint.toString(), {
@@ -1432,21 +1552,25 @@ export async function POST(req: Request) {
       }
 
       const data = text ? JSON.parse(text) : {};
-      return NextResponse.json({ reply: extractReply(data) });
+      const rawReply = stripDoubleAsterisks(extractReply(data));
+      const reply = portfolioCitationTrigger(message)
+        ? ensurePortfolioCitations(rawReply)
+        : rawReply;
+      return NextResponse.json({ reply });
     } catch (err) {
       console.error("Upstream /chat/completions failed:", err);
       if (bestPortfolio) {
         return NextResponse.json({
           reply:
             "Upstream chat API unavailable; returning best portfolio based on local data.\n\n" +
-            bestPortfolio.reply,
+            ensurePortfolioCitations(stripDoubleAsterisks(bestPortfolio.reply)),
         });
       }
       if (bestPlan) {
         return NextResponse.json({
           reply:
             "Upstream chat API unavailable; returning best plan based on local data.\n\n" +
-            bestPlan.reply,
+            stripDoubleAsterisks(bestPlan.reply),
         });
       }
       return NextResponse.json(
@@ -1462,4 +1586,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

@@ -101,3 +101,46 @@ The system reports the first threshold at which:
 - runner-up profit exceeds best profit
 
 These thresholds are included in `data/thresholds.json` and must be cited.
+
+## Knowledge signals (optional fallbacks)
+
+If JSON artifacts are missing, the chat layer will parse the following lines
+from any `knowledge/*.md` file to populate the portfolio context pack.
+Keep each signal on a single line.
+
+TRACE_SUMMARY: TRACE_MISSING: run pipeline to generate portfolio_trace.json
+TOP1_TOP2_ONE_SENTENCE: TOPK_MISSING: run pipeline to generate topk_portfolios.json
+TOP1_TOP2_KEY_DELTAS: {}
+THRESHOLD_BUNKER: THRESHOLD_MISSING
+THRESHOLD_DELAY: THRESHOLD_MISSING
+
+## Example response format (no asterisks)
+
+According to the BEST_PORTFOLIO data provided, the optimal combination earns:
+
+Total Profit: $16,417,021.62
+
+This portfolio assigns 10 vessels out of 15 available to 10 cargos out of 11 available.
+
+Top 3 Most Profitable Individual Assignments:
+
+1. EVEREST OCEAN → Indonesia – India (Coal)
+   Adjusted Profit: $1,905,972.33
+   TCE: $91,140.09/day
+
+2. ATLANTIC FORTUNE → South Africa – China (Iron Ore)
+   Adjusted Profit: $1,712,227.45
+   TCE: $38,196.37/day
+
+3. POLARIS SPIRIT → Australia – South Korea (Iron Ore)
+   Adjusted Profit: $2,061,830.25
+   TCE: $71,787.02/day
+
+Why This Combination is Best:
+
+The optimizer evaluated 17,474,313 combinations after applying feasibility filters (freight rate > 0, laycan feasibility, quantity within range and ≤ vessel DWT). The selected combination maximizes total fleet profit by:
+Matching vessels to cargos based on adjusted profit (after waiting costs for early laycan arrivals)
+Searching cargo quantities in 1% steps across contract ranges
+Optimizing speed blends (0-100% between warranted and economical profiles)
+
+Note: The system indicates TRACE_MISSING and TOPK_MISSING, meaning the step-by-step trace and top-K comparison data are not currently available. To see why this combination beats the second-best alternative, you would need to run the pipeline to generate data/portfolio_trace.json and data/topk_portfolios.json.
