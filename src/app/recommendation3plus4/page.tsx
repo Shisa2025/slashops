@@ -37,6 +37,7 @@ type RecommendationData = {
     charteredIn: boolean;
     assumedHireRate: number | null;
     cargoName: string;
+    cargoSource: "committed" | "market";
     route: string;
     cargoQty: number;
     tce: number;
@@ -240,7 +241,7 @@ export default function Recommendation3Plus4Page() {
                   <span>{data.summary.vesselCount}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Committed cargos</span>
+                  <span>Cargos assigned</span>
                   <span>{data.summary.cargoCount}</span>
                 </div>
                 <div className="flex items-center justify-between font-semibold text-neutral-900">
@@ -345,7 +346,12 @@ export default function Recommendation3Plus4Page() {
                             : ""}
                         </div>
                       </td>
-                      <td className="px-3 py-2">{item.cargoName}</td>
+                      <td className="px-3 py-2">
+                        <div>{item.cargoName}</div>
+                        <div className="text-[11px] text-neutral-500">
+                          {item.cargoSource}
+                        </div>
+                      </td>
                       <td className="px-3 py-2">{item.route}</td>
                       <td className="px-3 py-2 text-right">
                         {formatNumber(item.cargoQty)}

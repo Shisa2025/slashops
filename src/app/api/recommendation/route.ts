@@ -28,7 +28,7 @@ type VesselOption = {
 type CargoOption = {
   id: string;
   name: string;
-  source: "committed";
+  source: "committed" | "market";
   data: FreightInputs["cargo"];
   quantityRange: QuantityRange | null;
   loadPort: string;
@@ -236,30 +236,6 @@ const blendValues = Array.from({ length: 101 }, (_, i) =>
   Number.parseFloat((i * speedStep).toFixed(2)),
 );
 
-const buildPermutations = (count: number, length: number) => {
-  const results: number[][] = [];
-  const used = Array(count).fill(false);
-  const current: number[] = [];
-
-  const walk = () => {
-    if (current.length === length) {
-      results.push([...current]);
-      return;
-    }
-    for (let i = 0; i < count; i += 1) {
-      if (used[i]) continue;
-      used[i] = true;
-      current.push(i);
-      walk();
-      current.pop();
-      used[i] = false;
-    }
-  };
-
-  walk();
-  return results;
-};
-
 const buildCombos = (count: number, pick: number) => {
   const combos: number[][] = [];
   const walk = (start: number, current: number[]) => {
@@ -275,6 +251,63 @@ const buildCombos = (count: number, pick: number) => {
   };
   walk(0, []);
   return combos;
+};
+
+const hungarian = (cost: number[][]) => {
+  const n = cost.length;
+  const m = cost[0]?.length ?? 0;
+  const u = Array(n + 1).fill(0);
+  const v = Array(m + 1).fill(0);
+  const p = Array(m + 1).fill(0);
+  const way = Array(m + 1).fill(0);
+
+  for (let i = 1; i <= n; i += 1) {
+    p[0] = i;
+    let j0 = 0;
+    const minv = Array(m + 1).fill(Number.POSITIVE_INFINITY);
+    const used = Array(m + 1).fill(false);
+    do {
+      used[j0] = true;
+      const i0 = p[j0];
+      let delta = Number.POSITIVE_INFINITY;
+      let j1 = 0;
+      for (let j = 1; j <= m; j += 1) {
+        if (used[j]) continue;
+        const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+        if (cur < minv[j]) {
+          minv[j] = cur;
+          way[j] = j0;
+        }
+        if (minv[j] < delta) {
+          delta = minv[j];
+          j1 = j;
+        }
+      }
+      for (let j = 0; j <= m; j += 1) {
+        if (used[j]) {
+          u[p[j]] += delta;
+          v[j] -= delta;
+        } else {
+          minv[j] -= delta;
+        }
+      }
+      j0 = j1;
+    } while (p[j0] !== 0);
+
+    do {
+      const j1 = way[j0];
+      p[j0] = p[j1];
+      j0 = j1;
+    } while (j0 !== 0);
+  }
+
+  const assignment = Array(n).fill(-1);
+  for (let j = 1; j <= m; j += 1) {
+    if (p[j] > 0) {
+      assignment[p[j] - 1] = j - 1;
+    }
+  }
+  return assignment;
 };
 
 export async function POST(req: Request) {
@@ -300,11 +333,12 @@ export async function POST(req: Request) {
 
     const todayIso = new Date().toISOString().slice(0, 10);
     const dataRoot = path.join(process.cwd(), "public", "business_data");
-    const [capesizeText, marketVesselsText, committedText, distancesText] =
+    const [capesizeText, marketVesselsText, committedText, marketCargosText, distancesText] =
       await Promise.all([
         fs.readFile(path.join(dataRoot, "vessels", "capesize_vessels.csv"), "utf8"),
         fs.readFile(path.join(dataRoot, "vessels", "market_vessels.csv"), "utf8"),
         fs.readFile(path.join(dataRoot, "cargos", "committed_cargos.csv"), "utf8"),
+        fs.readFile(path.join(dataRoot, "cargos", "market_cargos.csv"), "utf8"),
         fs.readFile(path.join(dataRoot, "port_data", "port_distances.csv"), "utf8"),
       ]);
 
@@ -411,8 +445,10 @@ export async function POST(req: Request) {
     });
 
     const committedRows = parseCsv(committedText);
+    const marketCargoRows = parseCsv(marketCargosText);
     const baseCosts = exampleInputs.costs;
-    const cargosParsed: CargoOption[] = committedRows.map((row, index) => {
+    const cargosParsed: CargoOption[] = [...committedRows, ...marketCargoRows].map((row, index) => {
+      const source = index < committedRows.length ? "committed" : "market";
       const name = row.route || row.customer || `Cargo ${index + 1}`;
       const { baseQty, range: quantityRange } = parseQuantityRange(
         row.quantity,
@@ -440,9 +476,9 @@ export async function POST(req: Request) {
       const laycanWindow = parseLaycanRange(laycanLabel);
 
       return {
-        id: `committed-${index}`,
+        id: `${source}-${index}`,
         name,
-        source: "committed",
+        source,
         quantityRange,
         loadPort: loadPort || loadPortRaw || "UNKNOWN",
         dischargePort: dischargePort || dischargePortRaw || "UNKNOWN",
@@ -463,15 +499,16 @@ export async function POST(req: Request) {
         },
       };
     });
+    const committedCount = committedRows.length;
+    const marketCount = marketCargoRows.length;
 
     if (cargosParsed.length === 0 || vesselsParsed.length === 0) {
       return NextResponse.json({
-        reply: "Missing vessel or committed cargo data. Please check CSV files in /public.",
+        reply: "Missing vessel or cargo data. Please check CSV files in /public.",
       });
     }
 
     let calcCount = 0;
-    const pairMap = new Map<string, PairResult | null>();
 
     const computeBestPair = (vessel: VesselOption, cargo: CargoOption) => {
       if (!Number.isFinite(cargo.data.freightRate) || cargo.data.freightRate <= 0) {
@@ -590,19 +627,30 @@ export async function POST(req: Request) {
       return best;
     };
 
-    for (const vessel of vesselsParsed) {
-      for (const cargo of cargosParsed) {
-        const key = `${vessel.id}::${cargo.id}`;
-        pairMap.set(key, computeBestPair(vessel, cargo));
-      }
-    }
+    const pairResults: Array<Array<PairResult | null>> = vesselsParsed.map((vessel) =>
+      cargosParsed.map((cargo) => computeBestPair(vessel, cargo)),
+    );
 
     const totalVessels = vesselsParsed.length;
     const vesselPick = Math.min(vesselCount, totalVessels);
     const vesselCombos = buildCombos(totalVessels, vesselPick);
-    const cargoCount = cargosParsed.length;
-    const assignmentPermutations =
-      cargoCount > 0 ? buildPermutations(vesselPick, Math.min(cargoCount, vesselPick)) : [];
+    const marketOffset = committedCount;
+
+    if (committedCount > vesselPick) {
+      return NextResponse.json({
+        reply: `Committed cargos (${committedCount}) exceed selected vessels (${vesselPick}). Increase vessel count or reduce committed cargos.`,
+      });
+    }
+
+    let maxProfit = 0;
+    for (const row of pairResults) {
+      for (const pair of row) {
+        if (pair && Number.isFinite(pair.adjustedProfit) && pair.adjustedProfit > maxProfit) {
+          maxProfit = pair.adjustedProfit;
+        }
+      }
+    }
+    const big = maxProfit + 1_000_000_000;
 
     type PortfolioResult = {
       vessels: VesselOption[];
@@ -611,60 +659,112 @@ export async function POST(req: Request) {
     };
 
     let bestPortfolio: PortfolioResult | null = null;
-
     let evaluatedPortfolios = 0;
+
     for (const combo of vesselCombos) {
       const selected = combo.map((idx) => vesselsParsed[idx]);
-      let bestForCombo: PortfolioResult | null = null;
+      const assignments: Array<{ vessel: VesselOption; cargo: CargoOption; pair: PairResult }> = [];
+      let total = 0;
+      let feasible = true;
+      const usedVesselPositions = new Set<number>();
 
-      for (const permutation of assignmentPermutations) {
-        if (cargoCount > permutation.length) continue;
-        let feasible = true;
-        let total = 0;
-        const assignments: Array<{ vessel: VesselOption; cargo: CargoOption; pair: PairResult }> = [];
-
-        for (let i = 0; i < cargoCount; i += 1) {
-          const vessel = selected[permutation[i]];
-          const cargo = cargosParsed[i];
-          const pair = pairMap.get(`${vessel.id}::${cargo.id}`);
-          if (!pair) {
+      if (committedCount > 0) {
+        const committedCost = Array.from({ length: committedCount }, (_, cargoIdx) =>
+          Array.from({ length: vesselPick }, (_, vesselPos) => {
+            const vesselIdx = combo[vesselPos];
+            const pair = pairResults[vesselIdx][cargoIdx];
+            return pair ? maxProfit - pair.adjustedProfit : big;
+          }),
+        );
+        const committedAssignment = hungarian(committedCost);
+        for (let cargoIdx = 0; cargoIdx < committedCount; cargoIdx += 1) {
+          const vesselPos = committedAssignment[cargoIdx];
+          if (vesselPos < 0 || vesselPos >= vesselPick) {
             feasible = false;
             break;
           }
+          if (usedVesselPositions.has(vesselPos)) {
+            feasible = false;
+            break;
+          }
+          const vesselIdx = combo[vesselPos];
+          const pair = pairResults[vesselIdx][cargoIdx];
+          if (!pair || !Number.isFinite(pair.adjustedProfit)) {
+            feasible = false;
+            break;
+          }
+          usedVesselPositions.add(vesselPos);
+          assignments.push({ vessel: vesselsParsed[vesselIdx], cargo: cargosParsed[cargoIdx], pair });
           total += pair.adjustedProfit;
-          assignments.push({ vessel, cargo, pair });
-        }
-
-        if (!feasible) continue;
-        evaluatedPortfolios += 1;
-        if (!bestForCombo || total > bestForCombo.totalProfit) {
-          bestForCombo = { vessels: selected, assignments, totalProfit: total };
         }
       }
 
-      if (bestForCombo && (!bestPortfolio || bestForCombo.totalProfit > bestPortfolio.totalProfit)) {
-        bestPortfolio = bestForCombo;
+      if (!feasible) {
+        continue;
+      }
+
+      const remainingPositions: number[] = [];
+      for (let pos = 0; pos < vesselPick; pos += 1) {
+        if (!usedVesselPositions.has(pos)) {
+          remainingPositions.push(pos);
+        }
+      }
+
+      if (remainingPositions.length > 0 && marketCount > 0) {
+        const marketCost = Array.from({ length: remainingPositions.length }, (_, rowIdx) =>
+          Array.from({ length: marketCount + remainingPositions.length }, (_, colIdx) => {
+            if (colIdx >= marketCount) return maxProfit;
+            const vesselIdx = combo[remainingPositions[rowIdx]];
+            const cargoIdx = marketOffset + colIdx;
+            const pair = pairResults[vesselIdx][cargoIdx];
+            return pair ? maxProfit - pair.adjustedProfit : big;
+          }),
+        );
+        const marketAssignment = hungarian(marketCost);
+        for (let rowIdx = 0; rowIdx < remainingPositions.length; rowIdx += 1) {
+          const colIdx = marketAssignment[rowIdx];
+          if (colIdx < 0 || colIdx >= marketCount) continue;
+          const vesselIdx = combo[remainingPositions[rowIdx]];
+          const cargoIdx = marketOffset + colIdx;
+          const pair = pairResults[vesselIdx][cargoIdx];
+          if (!pair || !Number.isFinite(pair.adjustedProfit) || pair.adjustedProfit <= 0) {
+            continue;
+          }
+          assignments.push({ vessel: vesselsParsed[vesselIdx], cargo: cargosParsed[cargoIdx], pair });
+          total += pair.adjustedProfit;
+        }
+      }
+
+      evaluatedPortfolios += 1;
+      if (!bestPortfolio || total > bestPortfolio.totalProfit) {
+        bestPortfolio = { vessels: selected, assignments, totalProfit: total };
       }
     }
 
     if (!bestPortfolio) {
       return NextResponse.json({
         reply:
-          "No feasible recommendation found for the committed cargos with the current inputs.",
+          "No feasible recommendation found for the committed/market cargos with the current inputs.",
       });
     }
 
     const assignedVesselIds = new Set(bestPortfolio.assignments.map((item) => item.vessel.id));
     const unassigned = bestPortfolio.vessels.filter((vessel) => !assignedVesselIds.has(vessel.id));
+    const assignedCargoCount = bestPortfolio.assignments.length;
+    const assignedCommittedCount = bestPortfolio.assignments.filter(
+      (item) => item.cargo.source === "committed",
+    ).length;
+    const assignedMarketCount = assignedCargoCount - assignedCommittedCount;
 
     const hireNote = `Market vessels are assumed to be chartered-in at a daily hire rate of ${formatMoney(marketHireRate)}/day, applied uniformly for fair comparison against Cargill-owned vessels.`;
     const riskNote =
       "Legs marked [FALLBACK] rely on default distance; ETA, bunker, and profit may be materially off.";
 
     const replyLines = [
-      "Recommendation (4 vessels + committed cargos)",
+      `Recommendation (${vesselPick} vessels + committed/market cargos)`,
       `Inputs: IFO ${formatMoney(bunkerPrices.ifo)}/MT, MDO ${formatMoney(bunkerPrices.mdo)}/MT, Port delay +${formatNumber(portDelayDays)} days`,
       `Search: vessels=${totalVessels}, choose=${vesselPick}, combos=${formatNumber(vesselCombos.length)}, assignments tested=${formatNumber(evaluatedPortfolios)}, freight calcs=${formatNumber(calcCount)}`,
+      `Cargos: committed=${committedCount}, market=${marketCount}, assigned=${assignedCargoCount} (committed ${assignedCommittedCount}, market ${assignedMarketCount})`,
       "",
       `Best total adjusted profit: ${formatMoney(bestPortfolio.totalProfit)}`,
       "Selected vessels:",
@@ -693,7 +793,7 @@ export async function POST(req: Request) {
             ? `Market charter-in vessel (assumed hire ${formatMoney(marketHireRate)}/day, chartered-in)`
             : "Cargill-owned vessel";
         return (
-          `${idx + 1}. ${item.vessel.name} -> ${item.cargo.name}\n` +
+            `${idx + 1}. ${item.vessel.name} -> ${item.cargo.name} (${item.cargo.source})\n` +
           `   Vessel type: ${vesselType}\n` +
           `   Route: ${route}\n` +
           `   Distance: Ballast ${formatNumber(item.pair.ballastNm)} nm${ballastMarker} | ` +
@@ -717,7 +817,7 @@ export async function POST(req: Request) {
       summary: {
         totalAdjustedProfit: bestPortfolio.totalProfit,
         vesselCount: vesselPick,
-        cargoCount,
+        cargoCount: assignedCargoCount,
       },
       inputs: {
         ifoPrice: bunkerPrices.ifo,
@@ -752,6 +852,7 @@ export async function POST(req: Request) {
           charteredIn: item.vessel.source === "market",
           assumedHireRate: item.vessel.source === "market" ? marketHireRate : null,
           cargoName: item.cargo.name,
+          cargoSource: item.cargo.source,
           route,
           cargoQty: item.pair.cargoQty,
           tce: item.pair.tce,
