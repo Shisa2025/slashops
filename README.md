@@ -16,3 +16,10 @@ npm run dev
 
 ## Where to get the result
 Open `/manual` or `/recommendation3plus4`, then enter IFO/MDO/Delay/Hire and click "Get Recommendation".
+
+## Optional Links
+
+- Live demo (Vercel): https://slashops.vercel.app
+- GitHub repository: https://github.com/Shisa2025/slashops.git
+
+These links are provided for reference only. The submitted zip contains the complete runnable snapshot used for Phase 1 evaluation.
