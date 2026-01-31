@@ -269,6 +269,10 @@ export default function ManualCalculationPage() {
       waitingCost?: number;
       adjustedProfit?: number;
       weightIssue?: string;
+      inputAssumptions?: {
+        bunkerPrices: { ifo: number; mdo: number };
+        portDelayDays: number;
+      };
     }>
   >([]);
 
@@ -542,6 +546,7 @@ export default function ManualCalculationPage() {
             waitingCost: undefined,
             adjustedProfit: undefined,
             weightIssue: rangeReason,
+            inputAssumptions: undefined,
           };
         }
         const weightCheck = getWeightFeasibility(voyage.cargoQty, vessel.data.dwt);
@@ -553,6 +558,7 @@ export default function ManualCalculationPage() {
             waitingCost: undefined,
             adjustedProfit: undefined,
             weightIssue: weightCheck.reason ?? "Cargo quantity exceeds vessel DWT.",
+            inputAssumptions: undefined,
           };
         }
         const laycanEvaluation = getLaycanEvaluation(voyage, vessel, cargo);
@@ -564,6 +570,7 @@ export default function ManualCalculationPage() {
             waitingCost: undefined,
             adjustedProfit: undefined,
             weightIssue: undefined,
+            inputAssumptions: undefined,
           };
         }
         const inputs = getVoyageInputs(voyage);
@@ -586,6 +593,10 @@ export default function ManualCalculationPage() {
           waitingCost,
           adjustedProfit,
           weightIssue: undefined,
+          inputAssumptions: {
+            bunkerPrices: { ifo: bunkerPrices.ifo, mdo: bunkerPrices.mdo },
+            portDelayDays,
+          },
         };
       }),
     );
@@ -636,6 +647,7 @@ export default function ManualCalculationPage() {
               waitingCost: undefined,
               adjustedProfit: undefined,
               weightIssue: undefined,
+              inputAssumptions: undefined,
             }
           : voyage,
       ),
@@ -981,6 +993,10 @@ export default function ManualCalculationPage() {
             const result = voyage.result;
             const laycanEvaluation = voyage.laycanEvaluation;
             const weightIssue = voyage.weightIssue;
+            const inputAssumptions = voyage.inputAssumptions ?? {
+              bunkerPrices,
+              portDelayDays,
+            };
             const laycanStatus =
               laycanEvaluation?.status === "infeasible"
                 ? "Miss Laycan (Infeasible)"
@@ -1163,6 +1179,14 @@ export default function ManualCalculationPage() {
                         </div>
                       </section>
                     </div>
+                    <section className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+                      <h3 className="text-sm font-semibold text-neutral-700">Conclusion</h3>
+                      <div className="mt-2 text-xs text-neutral-600">
+                        Inputs used: IFO {formatMoney(inputAssumptions.bunkerPrices.ifo)}/MT, MDO{" "}
+                        {formatMoney(inputAssumptions.bunkerPrices.mdo)}/MT, Port delay assumption: +
+                        {formatNumber(inputAssumptions.portDelayDays)} days.
+                      </div>
+                    </section>
                   </div>
                 )}
               </section>
@@ -1173,10 +1197,6 @@ export default function ManualCalculationPage() {
     </main>
   );
 }
-
-
-
-
 
 
 

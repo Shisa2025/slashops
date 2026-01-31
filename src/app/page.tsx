@@ -17,6 +17,13 @@ const cards = [
     href: "/chat",
     cta: "Open Chat Assistant",
   },
+  {
+    title: "Recommendation (3+4)",
+    description:
+      "Explore the Recommendation (3+4) view and related guidance.",
+    href: "/recommendation3plus4",
+    cta: "Open Recommendation (3+4)",
+  },
 ];
 
 export default function Home() {
