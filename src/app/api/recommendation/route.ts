@@ -604,16 +604,18 @@ export async function POST(req: Request) {
     const assignmentPermutations =
       cargoCount > 0 ? buildPermutations(vesselPick, Math.min(cargoCount, vesselPick)) : [];
 
-    let bestPortfolio: {
+    type PortfolioResult = {
       vessels: VesselOption[];
       assignments: Array<{ vessel: VesselOption; cargo: CargoOption; pair: PairResult }>;
       totalProfit: number;
-    } | null = null;
+    };
+
+    let bestPortfolio: PortfolioResult | null = null;
 
     let evaluatedPortfolios = 0;
     for (const combo of vesselCombos) {
       const selected = combo.map((idx) => vesselsParsed[idx]);
-      let bestForCombo: typeof bestPortfolio | null = null;
+      let bestForCombo: PortfolioResult | null = null;
 
       for (const permutation of assignmentPermutations) {
         if (cargoCount > permutation.length) continue;
