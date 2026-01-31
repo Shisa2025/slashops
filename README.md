@@ -1,46 +1,18 @@
 # SlashOps
 
-A Next.js project with TypeScript and Tailwind CSS.
+## Project overview
+SlashOps is a Next.js prototype for dry bulk voyage evaluation and recommendation, including manual voyage P&L and a recommendation workflow.
 
-## 🚀 Getting Started | 开始使用
+## How to run locally
+Install dependencies and start the dev server, then open the app in your browser.
 
-### Installation | 安装
-
-After cloning this repository, install the dependencies:
-
-克隆此仓库后，安装依赖：
-
-```bash
+## npm install
 npm install
-```
 
-### Development | 开发
-
-Run the development server:
-
-运行开发服务器：
-
-```bash
+## npm run dev
 npm run dev
-```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## copy paste "localhost:3000" or type down on the search engine URL
 
-在浏览器中打开 [http://localhost:3000](http://localhost:3000) 查看结果。
-
-### Build | 构建
-
-Build the production version:
-
-构建生产版本：
-
-```bash
-npm run build
-npm start
-```
-
----
-
-**Written by Shisa**
-wox
-
+## Where to get the result
+Open `/manual` or `/recommendation3plus4`, then enter IFO/MDO/Delay/Hire and click "Get Recommendation".
